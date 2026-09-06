@@ -45,8 +45,17 @@ cited. A benchmark whose author can move the goalposts is not a benchmark.
 
 ## Status
 
-**Scoping.** Nothing is implemented. The pre-registration is committed; the
-code is not written. That order is the whole point.
+**Shell only.** The CLI surface exists — `serve`, `guide`, `help-json`,
+`version` — and none of the booking domain does. Every route but `/_health`,
+`/version` and `/guide` answers `501 not_implemented`, which is the honest
+state rather than a bug.
+
+The pre-registration was committed before any code, and
+[`docs/ledger.md`](docs/ledger.md) is still empty because nothing has been
+built yet to find a gap with. That order is the whole point.
+
+Running at <https://creneau-dk3.intrane.fr> — dk3, fronted by dk1's Traefik
+over an SSH reverse tunnel, alongside the bkn instance it will be built on.
 
 ## Why booking
 
