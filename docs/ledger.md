@@ -71,8 +71,43 @@ does not exist yet, rather than guessed at.
 | F2 compensating code for a refusal | ≤ 150 lines | **136** lines of JS for rows 1-2 |
 | F3 authenticated endpoint needing a hook | none | — (features 7, 8 unbuilt) |
 | F4 application lines | < 2,500 | **1,240** Go + 136 JS = **1,376** |
-| F5 agent completes a booking | ≤ 10 calls | — (not run) |
+| F5 agent completes a booking | ≤ 10 calls | **PASSED — 6** |
 | F6 double-bookings at c=16 | 0 | **PASSED — 0** |
+
+### F5, in full
+
+A subagent was given the binary path and the environment, told it could learn
+the tool only from `guide` / `help-json` / error messages, and forbidden from
+reading any source. It completed availability -> event -> slots -> book ->
+verify in **6 tool calls** (9 `creneau` invocations, some bundled per call).
+
+The count is observed, not self-reported: the binary was behind a wrapper that
+logged every invocation, and the booking it claimed was checked in the SQLite
+file afterwards.
+
+```
+1 guide        2 install      3 availability set ...   4 event create ...
+5 slots ...    6 book ...     7 bookings list ...      8-9 slots ... (verifying)
+```
+
+It never needed `--help`, never hit an error, and never guessed wrong. That
+last part is also a limitation: **the error-message contract is untested by
+this run**, because the guide steered it past every failure mode.
+
+**The test earned its keep by finding three defects in the guide**, all now
+fixed:
+
+1. `--calendar` was missing from the `event create` usage line while the `loop`
+   used it — the most important flag on that command, documented only by
+   example.
+2. The weekday flags were not enumerated; only `--mon` appeared, so `--wed`,
+   `--thu` and `--fri` had to be guessed from the pattern.
+3. **A sentence that actively misled.** "Touching ends do not overlap" is true
+   with no buffers and wrong with them. After booking 09:00-09:30 with
+   `buffer-after 10`, the 08:30 slot also disappeared — because a candidate is
+   tested *including its own buffers*, so a slot ending at 09:00 needs
+   09:00-09:10 free too. The behaviour is correct; the sentence was not, and it
+   is exactly the kind of thing the author cannot see in his own text.
 
 ### F6, in full
 
