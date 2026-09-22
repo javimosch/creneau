@@ -196,9 +196,13 @@ func sendRecoveryMail(to, labID, code string) error {
 	body, _ := json.Marshal(map[string]any{
 		"from": from, "to": []string{to},
 		"subject": "Your creneau recovery code: " + code,
+		// A person gets a link, an agent gets the curl. The link only opens a page;
+		// it does not spend the code, so a mail scanner prefetching it is harmless.
 		"text": "Someone asked to recover the admin token for the creneau board \"" + labID + "\".\n\n" +
-			"Recovery code: " + code + "\n\nIt is valid for 30 minutes and can be used once:\n\n" +
-			"  curl -X POST https://board.creneau.intrane.fr/v1/labs/recover/confirm \\\n" +
+			"Open this to get back in:\n\n  " + selfURL() + "/" + labID + "/recover?code=" + code + "\n\n" +
+			"Recovery code: " + code + "\nIt is valid for 30 minutes and can be used once.\n\n" +
+			"Prefer the API? Same thing:\n\n" +
+			"  curl -X POST " + selfURL() + "/v1/labs/recover/confirm \\\n" +
 			"    -H 'content-type: application/json' \\\n" +
 			"    -d '{\"lab\":\"" + labID + "\",\"code\":\"" + code + "\"}'\n\n" +
 			"If this was not you, ignore it — nothing has changed yet.\n",

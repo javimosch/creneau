@@ -186,6 +186,9 @@ func serve(args []string) {
 	mux.HandleFunc("GET /", labIndexHandler)
 	mux.HandleFunc("GET /{lab}", labBoardHandler)
 	mux.HandleFunc("GET /{lab}/admin", labAdminPageHandler)
+	// The clickable half of recovery. GET only renders — it never confirms, because
+	// mail scanners prefetch links and the code is single-use.
+	mux.HandleFunc("GET /{lab}/recover", recoverPageHandler)
 	// Self-serve: a lab creates itself and administers it with a capability.
 	mux.HandleFunc("POST /v1/labs", createLabHandler)
 	// SSO for organizers. /auth/done is the single registered redirect_uri;
