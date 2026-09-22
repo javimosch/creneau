@@ -87,7 +87,7 @@ color:var(--no);font:600 12.5px var(--sans);cursor:pointer}
 .api a{color:var(--ac)}
 </style></head><body><div class="wrap">
 <header><h1>__LAB__ — machine board</h1>
-<a class="adm" href="/__LAB__/admin">Organizer? Manage this board &rarr;</a></header>
+<a class="adm" href="/__LABID__/admin">Organizer? Manage this board &rarr;</a></header>
 <p class="sub" id="tzline"></p>
 <div id="mine"></div>
 <div class="days" id="days"></div>
@@ -218,6 +218,10 @@ func boardPage(l lab) string {
 		ms = append(ms, map[string]any{"id": m.ID, "name": m.Name})
 	}
 	j, _ := json.Marshal(ms)
+	// __LAB__ is the display NAME and __LABID__ is the url slug. They are one
+	// character apart and a name works fine in a heading, so putting __LAB__ in
+	// an href fails only for labs whose name differs from their id — which is
+	// every real lab. Use __LABID__ in every URL.
 	s := strings.ReplaceAll(boardHTML, "__LAB__", html.EscapeString(l.Name))
 	s = strings.ReplaceAll(s, "__LABID__", l.ID)
 	return strings.ReplaceAll(s, "__MACHINES__", string(j))
