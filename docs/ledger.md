@@ -18,6 +18,8 @@ The rule each row is judged against, from
 | 4 | Installing a script over HTTP | **Refused** | There is no create route — `bkn script create` is CLI-only, so `creneau install` shells out to the binary rather than pretending it can provision a remote instance. Provisioning is an administrative act on a machine you already have, not something an application does to a server it merely talks to. | none |
 | 3 | Two bounds on one field over HTTP (`?start=gte:A&start=lt:B`) | **Admitted** | Not a new query feature — the six operators already exist and both other surfaces express a range. `storeList` reads `vals[0]`, so a repeated query parameter silently collapses to the first and the second bound is **dropped without an error**. Making the existing surface reachable removes a script from every embedder that needs a range read. | `internal/server/server.go`: iterate all `vals`, not `vals[0]` |
 
+| 5 | Reading the collection registry over HTTP | **Refused (not requested)** | Hit on 2026-09-22 building `creneau install --verify`, which answers "if this bkn vanished, would the repo rebuild it?". bkn is schemaless on read — an undeclared collection answers 200 with no records — and no route lists collections or their normalize rules, so a config check cannot see them. Not filed as a request: the same asymmetry as rows 1-3, and `bkn store list` on the host is the answer. Recorded because it is the second time the asymmetry changed what an out-of-process app could build. | none |
+
 ## The surface asymmetry behind rows 1-3
 
 All three rows are one finding seen from three angles, and it is the first

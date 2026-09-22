@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"flag"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
@@ -29,10 +30,15 @@ func install(args []string) {
 	fs := flag.NewFlagSet("install", flag.ExitOnError)
 	bin := fs.String("bkn", "bkn", "path to the bkn binary")
 	dry := fs.Bool("dry-run", false, "print what would be done")
+	verify := fs.Bool("verify", false, "check a live bkn against this repo; exit 93 on drift, change nothing")
 	_ = fs.Parse(args)
 
 	c := newBkn()
 	colls := []string{"labs", "sessions", "authstate", "calendars", "availability", "events", "bookings"}
+	if *verify {
+		verifyInstall(c, colls)
+		return
+	}
 	for _, coll := range colls {
 		if *dry {
 			fmt.Fprintf(os.Stderr, "  declare %s/%s\n", ns, coll)
@@ -453,4 +459,63 @@ func failBkn(err error) {
 	default:
 		fail(exitUnavailable, "bkn_error", be.Error())
 	}
+}
+
+// verifyInstall answers the question a backup is really for: if this bkn
+// disappeared, would `creneau install` rebuild it exactly? It compares a live
+// instance against what this repo declares and changes nothing.
+//
+// The scripts are the part that can drift invisibly — they live in bkn, not in
+// the deployment, so an edit on the server leaves no trace in git.
+func verifyInstall(c *bkn, colls []string) {
+	drift := []string{}
+
+	// Collections cannot be checked over HTTP. bkn is schemaless on read — an
+	// undeclared collection answers 200 with no records — and there is no route
+	// that lists the collection registry or its normalize rules. That is the
+	// same surface asymmetry docs/ledger.md records: the registry is reachable
+	// from the CLI and the Go packages, not from the API. So this reports what
+	// it could not check instead of implying it passed.
+	unchecked := []string{}
+	for _, coll := range colls {
+		if _, err := c.list(ns, coll, nil); err != nil {
+			fail(exitUnavailable, "unreachable", err.Error(), "is bkn running? BKN_URL="+c.base)
+		}
+	}
+	unchecked = append(unchecked,
+		fmt.Sprintf("%d collection declarations and their normalize rules — no HTTP route exposes the registry; check with `bkn store list` on the host", len(colls)))
+
+	var live struct {
+		Scripts []struct{ Name string } `json:"scripts"`
+	}
+	if err := c.do(http.MethodGet, "/v1/script", nil, &live); err != nil {
+		fail(exitUnavailable, "unreachable", err.Error())
+	}
+	have := map[string]bool{}
+	for _, s := range live.Scripts {
+		have[s.Name] = true
+	}
+	names, _ := scripts.ReadDir("scripts")
+	for _, f := range names {
+		name := strings.TrimSuffix(f.Name(), ".js")
+		if !have[name] {
+			drift = append(drift, "script "+name+" is missing")
+		}
+		delete(have, name)
+	}
+	for extra := range have {
+		drift = append(drift, "script "+extra+" exists in bkn but not in this repo")
+	}
+
+	if len(drift) > 0 {
+		out(map[string]any{
+			"ok": false, "bkn": c.base, "drift": drift, "unchecked": unchecked,
+			"note": "run `creneau install` to bring this bkn back to what the repo declares",
+		})
+		os.Exit(93)
+	}
+	out(map[string]any{
+		"ok": true, "bkn": c.base, "scripts": len(names), "unchecked": unchecked,
+		"note": "every script this repo declares is present and reachable; `creneau install` rebuilds this bkn from scratch",
+	})
 }
