@@ -66,6 +66,25 @@ func sessionStartHandler(w http.ResponseWriter, r *http.Request) {
 
 // labSession authorises by session OR admin token, so agents keep using the key
 // while the browser uses the session. It slides the expiry on use.
+// sessionValidFor reports whether tok is a live session for labID. It takes the
+// lab id explicitly, so it works where there is no matched request to read a
+// path value from.
+func sessionValidFor(c *bkn, tok, labID string) bool {
+	tok = strings.TrimSpace(strings.TrimPrefix(tok, "Bearer "))
+	if tok == "" || labID == "" {
+		return false
+	}
+	d, err := c.get(ns, "sessions", hashToken(tok))
+	if err != nil {
+		return false
+	}
+	exp, perr := time.Parse(stamp, asStr(d["expires"]))
+	if perr != nil || time.Now().UTC().After(exp) {
+		return false
+	}
+	return asStr(d["lab"]) == labID
+}
+
 func labSession(r *http.Request, c *bkn) (lab, bool) {
 	if l, ok := labAdmin(r, c); ok {
 		return l, true
@@ -84,6 +103,11 @@ func labSession(r *http.Request, c *bkn) (lab, bool) {
 		return lab{}, false
 	}
 	labID := asStr(d["lab"])
+	// r.PathValue only resolves on a request the ServeMux actually matched. A
+	// hand-built *http.Request returns "" here, which silently fails every
+	// session — that is how the SSO account-linking flow was broken for every
+	// provider. Callers that do not have a matched request use
+	// sessionValidFor() instead of fabricating one.
 	if labID != r.PathValue("lab") {
 		return lab{}, false
 	}

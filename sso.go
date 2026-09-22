@@ -131,10 +131,7 @@ func authStartHandler(w http.ResponseWriter, r *http.Request) {
 	// "link" mode attaches a new identity to a lab the caller already administers,
 	// proven by an existing session rather than by pasting the key again.
 	if link := strings.TrimSpace(r.URL.Query().Get("link")); link != "" {
-		if _, ok := labSession(&http.Request{
-			Header: http.Header{"Authorization": []string{"Bearer " + link}},
-			URL:    r.URL,
-		}, c); !ok {
+		if !sessionValidFor(c, link, labID) {
 			writeErr(w, http.StatusForbidden, "forbidden", "that session is not valid")
 			return
 		}
