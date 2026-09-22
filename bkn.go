@@ -200,3 +200,9 @@ func scriptResult(v doc, err error) (doc, error) {
 	}
 	return v, nil
 }
+
+// del removes a document. Used for session revocation, where deleting the row
+// IS the revocation — no denylist, no waiting out an expiry.
+func (c *bkn) del(ns, coll, id string) error {
+	return c.do(http.MethodDelete, "/v1/store/"+ns+"/"+coll+"/"+url.PathEscape(id), nil, nil)
+}

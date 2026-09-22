@@ -185,6 +185,7 @@ func serve(args []string) {
 	// part of the calendar key, so a request cannot forget which tenant it is.
 	mux.HandleFunc("GET /", labIndexHandler)
 	mux.HandleFunc("GET /{lab}", labBoardHandler)
+	mux.HandleFunc("GET /{lab}/admin", labAdminPageHandler)
 	// Self-serve: a lab creates itself and administers it with a capability.
 	mux.HandleFunc("POST /v1/labs", createLabHandler)
 	// Losing the admin token must not orphan a lab.
@@ -192,6 +193,11 @@ func serve(args []string) {
 	mux.HandleFunc("POST /v1/labs/recover/confirm", recoverConfirmHandler)
 	mux.HandleFunc("POST /{lab}/v1/machines", addMachineHandler)
 	mux.HandleFunc("GET /{lab}/v1/admin", adminViewHandler)
+	// The browser exchanges the admin key for a session, and never stores the key.
+	mux.HandleFunc("POST /{lab}/v1/session", sessionStartHandler)
+	mux.HandleFunc("DELETE /{lab}/v1/session", sessionEndHandler)
+	mux.HandleFunc("POST /{lab}/v1/machines/{machine}/closures", closeDayHandler)
+	mux.HandleFunc("POST /{lab}/v1/admin/cancel", adminCancelHandler)
 	mux.HandleFunc("GET /_health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "service": "creneau", "pid": os.Getpid()})
 	})

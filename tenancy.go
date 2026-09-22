@@ -99,7 +99,7 @@ func (l lab) machineByID(id string) (machine, bool) {
 func labCmd(args []string) {
 	if len(args) == 0 {
 		fail(exitUsage, "missing_argument", "lab needs a subcommand",
-			"creneau lab create <id> --name '...' | lab list | lab show <id> | lab add-machine <id> <machine>")
+			"creneau lab create <id> --name '...' | lab list | lab show <id> | lab add-machine <id> <machine> | lab rotate <id>")
 	}
 	switch args[0] {
 	case "create":
@@ -110,6 +110,8 @@ func labCmd(args []string) {
 		labShow(args[1:])
 	case "add-machine":
 		labAddMachine(args[1:])
+	case "rotate":
+		labRotate(args[1:])
 	default:
 		fail(exitUsage, "invalid_value", "unknown lab subcommand "+args[0],
 			"creneau lab create|list|show|add-machine")
@@ -136,14 +138,26 @@ func labCreate(args []string) {
 	if _, err := c.get(ns, "labs", id); err == nil {
 		fail(exitConflict, "conflict", "lab "+id+" already exists", "creneau lab show "+id)
 	}
+	// Mint an admin token here too, or a CLI-created lab cannot use its own
+	// admin page — the HTTP path did this and the CLI did not, which made the
+	// two produce labs with different capabilities.
+	tok, terr := manageToken()
+	if terr != nil {
+		fail(exitUnavailable, "internal", "could not mint an admin token")
+	}
 	rec, err := c.put(ns, "labs", id, doc{
 		"id": id, "name": *name, "tz": *tz,
 		"machines": []any{}, "created_at": time.Now().UTC().Format(stamp),
+		"admin_token_hash": hashToken(tok),
+		"trial_ends":       time.Now().UTC().AddDate(0, 0, 30).Format(stamp),
 	})
 	if err != nil {
 		failBkn(err)
 	}
-	out(map[string]any{"ok": true, "lab": rec, "board": "/" + id})
+	delete(rec, "admin_token_hash")
+	out(map[string]any{"ok": true, "lab": rec, "board": "/" + id,
+		"admin": "/" + id + "/admin", "admin_token": tok,
+		"note": "the admin token is shown once — it is stored hashed"})
 }
 
 func labList() {
@@ -221,4 +235,27 @@ func ownedBy(rec doc, labID string) bool {
 		return false
 	}
 	return strings.HasPrefix(asStr(rec["calendar"]), labID+":")
+}
+
+// labRotate mints a fresh admin token for an existing lab — needed for labs
+// created before `lab create` minted one, and useful as an operator escape
+// hatch when a token leaks.
+func labRotate(args []string) {
+	if len(args) == 0 {
+		fail(exitUsage, "missing_argument", "lab rotate needs an id", "creneau lab rotate <id>")
+	}
+	c := newBkn()
+	if _, err := loadLab(c, args[0]); err != nil {
+		fail(exitUnavailable, "not_found", "no such lab "+args[0])
+	}
+	tok, terr := manageToken()
+	if terr != nil {
+		fail(exitUnavailable, "internal", "could not mint a token")
+	}
+	if _, err := c.patchIf(ns, "labs", args[0], doc{"admin_token_hash": hashToken(tok)}, nil); err != nil {
+		failBkn(err)
+	}
+	out(map[string]any{"ok": true, "lab": args[0], "admin_token": tok,
+		"admin": "/" + args[0] + "/admin",
+		"note":  "any previous admin token and existing sessions for this lab stop working"})
 }

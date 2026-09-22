@@ -189,9 +189,9 @@ func labAdmin(r *http.Request, c *bkn) (lab, bool) {
 // as the CLI verb does.
 func addMachineHandler(w http.ResponseWriter, r *http.Request) {
 	c := newBkn()
-	l, ok := labAdmin(r, c)
+	l, ok := labSession(r, c)
 	if !ok {
-		writeErr(w, http.StatusForbidden, "forbidden", "a valid lab admin token is required")
+		writeErr(w, http.StatusForbidden, "forbidden", "a valid session or admin token is required")
 		return
 	}
 	var in struct {
@@ -237,7 +237,7 @@ func addMachineHandler(w http.ResponseWriter, r *http.Request) {
 // every confirmed booking, which the public surface deliberately never exposes.
 func adminViewHandler(w http.ResponseWriter, r *http.Request) {
 	c := newBkn()
-	l, ok := labAdmin(r, c)
+	l, ok := labSession(r, c)
 	if !ok {
 		writeErr(w, http.StatusForbidden, "forbidden", "a valid lab admin token is required")
 		return

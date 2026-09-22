@@ -32,7 +32,7 @@ func install(args []string) {
 	_ = fs.Parse(args)
 
 	c := newBkn()
-	colls := []string{"labs", "calendars", "availability", "events", "bookings"}
+	colls := []string{"labs", "sessions", "calendars", "availability", "events", "bookings"}
 	for _, coll := range colls {
 		if *dry {
 			fmt.Fprintf(os.Stderr, "  declare %s/%s\n", ns, coll)
