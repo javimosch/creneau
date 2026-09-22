@@ -189,6 +189,8 @@ func serve(args []string) {
 	// The clickable half of recovery. GET only renders — it never confirms, because
 	// mail scanners prefetch links and the code is single-use.
 	mux.HandleFunc("GET /{lab}/recover", recoverPageHandler)
+	// The manage link from a booking confirmation. GET renders only.
+	mux.HandleFunc("GET /{lab}/b/{id}", bookingPageHandler)
 	// Self-serve: a lab creates itself and administers it with a capability.
 	mux.HandleFunc("POST /v1/labs", createLabHandler)
 	// SSO for organizers. /auth/done is the single registered redirect_uri;
@@ -331,7 +333,24 @@ func serve(args []string) {
 			writeBknErr(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "booking": rec})
+		// Confirm it by mail, with the manage link. Best effort and deliberately
+		// after the booking is durable: a slow mail server must never cost
+		// somebody their slot. Undeliverable addresses are skipped inside.
+		mailed := "skipped"
+		if m, ok := l.machineByID(body.Event); ok {
+			when := asStr(rec["start"])
+			if len(when) >= 16 {
+				when = strings.Replace(when[:16], "T", " at ", 1) + " UTC"
+			}
+			if merr := sendBookingMail(body.Who, labID, l.Name, m.Name, when,
+				asStr(rec["id"]), asStr(rec["manage_token"])); merr == nil {
+				mailed = "sent"
+			} else {
+				mailed = "not-mailed"
+			}
+		}
+		delete(rec, "manage_token_hash")
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "booking": rec, "confirmation": mailed})
 	})
 
 	// Anything else answers honestly rather than 404ing, so anybody who finds

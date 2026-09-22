@@ -209,10 +209,13 @@ func adminCancelHandler(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, "forbidden", "a valid session or admin token is required")
 		return
 	}
-	var in struct{ ID string }
+	var in struct{ ID, Message string }
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&in); err != nil || in.ID == "" {
 		writeErr(w, http.StatusBadRequest, "missing_argument", "id is required")
 		return
+	}
+	if len(in.Message) > 500 {
+		in.Message = in.Message[:500]
 	}
 	rec, err := c.get(ns, "bookings", in.ID)
 	if err != nil || !ownedBy(rec, l.ID) {
@@ -228,8 +231,19 @@ func adminCancelHandler(w http.ResponseWriter, r *http.Request) {
 		writeBknErr(w, cerr)
 		return
 	}
+	// Tell the guest, with the organizer's own words if they gave any. A slot
+	// taken away without explanation reads as a bug, and they cannot ask.
+	notified := "skipped"
+	if who := asStr(out["who"]); who != "" {
+		if merr := sendCancelMail(who, l.ID, l.Name,
+			machineLabel(l, out), whenLabel(out), in.Message); merr == nil {
+			notified = "sent"
+		} else {
+			notified = "not-mailed"
+		}
+	}
 	delete(out, "manage_token")
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "booking": out})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "booking": out, "notified": notified})
 }
 
 // --- editing and removing --------------------------------------------------

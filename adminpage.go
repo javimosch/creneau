@@ -281,11 +281,20 @@ function load(){
    b.onclick=function(){
     var row=b.closest('tr'),who=row?row.children[2].textContent:'this booking';
     var when=row?row.children[1].textContent:'';
-    // Cancelling somebody else's slot is not undoable and they are not asked.
-    if(!confirm('Cancel '+who+"'s booking"+(when?' on '+when:'')+'?\n\nThe slot frees up immediately. They are not notified.'))return;
+    // Cancelling somebody else's slot is not undoable, and a cancellation with
+    // no reason reads as a bug to whoever booked — so offer to say why.
+    var note=prompt('Cancel '+who+"'s booking"+(when?' on '+when:'')+'?\n\n'+
+     'They will be emailed. Add a message if you like (optional), or leave it blank:','');
+    if(note===null)return;
     b.disabled=true;b.textContent='…';
-    api('/v1/admin/cancel',{method:'POST',body:JSON.stringify({id:b.getAttribute('data-cancel')})})
-    .then(function(x){ if(x.s===200||x.s===409){load()} else {b.disabled=false;b.textContent='Cancel';
+    api('/v1/admin/cancel',{method:'POST',
+      body:JSON.stringify({id:b.getAttribute('data-cancel'),message:note})})
+    .then(function(x){ if(x.s===200||x.s===409){
+       if(x.j&&x.j.notified==='sent')say('bmsg','Cancelled — '+who+' was emailed.','ok');
+       else if(x.j&&x.j.notified==='not-mailed')say('bmsg','Cancelled, but the email could not be sent.','no');
+       else say('bmsg','Cancelled.','ok');
+       load()}
+     else {b.disabled=false;b.textContent='Cancel';
       say('bmsg',(x.j.error&&x.j.error.message)||'Could not cancel.','no')}})}});
  })}
 
