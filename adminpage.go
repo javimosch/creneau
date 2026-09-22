@@ -279,6 +279,10 @@ function load(){
    bt.appendChild(tr)});
   bt.querySelectorAll('[data-cancel]').forEach(function(b){
    b.onclick=function(){
+    var row=b.closest('tr'),who=row?row.children[2].textContent:'this booking';
+    var when=row?row.children[1].textContent:'';
+    // Cancelling somebody else's slot is not undoable and they are not asked.
+    if(!confirm('Cancel '+who+"'s booking"+(when?' on '+when:'')+'?\n\nThe slot frees up immediately. They are not notified.'))return;
     b.disabled=true;b.textContent='…';
     api('/v1/admin/cancel',{method:'POST',body:JSON.stringify({id:b.getAttribute('data-cancel')})})
     .then(function(x){ if(x.s===200||x.s===409){load()} else {b.disabled=false;b.textContent='Cancel';

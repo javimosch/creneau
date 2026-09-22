@@ -112,6 +112,19 @@ func recoverStartHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Deliver it, or say plainly that it could not be delivered. A recovery flow
 	// that silently drops the code is worse than one that admits it has no mailer.
+	// An address that can never receive mail is a different failure from a
+	// missing mailer, and saying "no mailer configured" when the mailer is fine
+	// sends the operator looking in the wrong place.
+	if !deliverable(to) {
+		fmt.Fprintf(os.Stderr, "[recover] lab=%s to=%s code=%s (undeliverable address: deliver by hand)\n",
+			labID, to, code)
+		reply["delivery"] = "undeliverable_address"
+		reply["message"] = "a recovery code was generated, but the address this board signed up " +
+			"with cannot receive mail (a test or reserved domain), so nothing was sent — the " +
+			"operator can read the code from the service journal (journalctl -u creneau)"
+		writeJSON(w, http.StatusOK, reply)
+		return
+	}
 	if err := sendRecoveryMail(to, labID, code); err != nil {
 		// The code is stored HASHED, so it cannot be read back from the record —
 		// an earlier version of this message claimed otherwise and was simply
@@ -188,6 +201,9 @@ func sendRecoveryMail(to, labID, code string) error {
 	key := os.Getenv("RESEND_API_KEY")
 	if key == "" {
 		return fmt.Errorf("RESEND_API_KEY not set")
+	}
+	if !deliverable(to) {
+		return fmt.Errorf("address is not deliverable: %s", to)
 	}
 	from := os.Getenv("CRENEAU_MAIL_FROM")
 	if from == "" {

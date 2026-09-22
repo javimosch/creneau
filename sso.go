@@ -409,6 +409,11 @@ func inviteOrganizer(labID, labName, email string) string {
 	if adm == "" || email == "" {
 		return "skipped"
 	}
+	// Don't mint an invitation nobody can ever receive: it would sit in the IdP
+	// unusable, and the send would bounce against our sending reputation.
+	if !deliverable(email) {
+		return "skipped-undeliverable-address"
+	}
 	idp := os.Getenv("IDP_URL")
 	if idp == "" {
 		idp = "https://idp.intrane.fr"
@@ -453,6 +458,9 @@ func sendInviteMail(to, labID, labName, inviteURL string) error {
 	key := os.Getenv("RESEND_API_KEY")
 	if key == "" {
 		return errString("RESEND_API_KEY not set")
+	}
+	if !deliverable(to) {
+		return errString("address is not deliverable: " + to)
 	}
 	from := os.Getenv("CRENEAU_MAIL_FROM")
 	if from == "" {

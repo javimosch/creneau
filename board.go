@@ -166,6 +166,22 @@ function remember(b,m,label){try{var a=mine();
  a.push({id:b.id,token:b.manage_token,machine:m,when:label,start:b.start});
  localStorage.setItem(LS,JSON.stringify(a))}catch(e){}}
 function forget(id){try{localStorage.setItem(LS,JSON.stringify(mine().filter(function(x){return x.id!==id})))}catch(e){}}
+// "Your bookings" lives in localStorage, so it used to keep showing a booking
+// the organizer had already cancelled — this browser was never told. Re-check
+// each remembered booking against the server (the manage token we hold is
+// exactly the proof needed to read it) and drop the ones that are gone.
+function syncMine(){
+ var a=mine();if(!a.length)return;
+ var left=a.length;
+ a.forEach(function(x){
+  fetch('/'+LAB+'/v1/booking/'+encodeURIComponent(x.id)+'?t='+encodeURIComponent(x.token||''))
+  .then(function(r){return r.json().then(function(j){return{s:r.status,j:j}})})
+  .then(function(r){
+   var b=r.j&&r.j.booking;
+   if(r.s===404||(b&&b.status&&b.status!=='confirmed'))forget(x.id)})
+  .catch(function(){})   // offline: keep what we have rather than wrongly forget
+  .finally(function(){if(--left===0)renderMine()})})}
+
 function renderMine(){
  var host=document.getElementById('mine'),a=mine();
  if(!a.length){host.innerHTML='';return}
@@ -178,6 +194,7 @@ function renderMine(){
   btn.onclick=function(){
    var id=btn.getAttribute('data-cancel'),rec=mine().filter(function(x){return x.id===id})[0];
    if(!rec){forget(id);renderMine();return}
+   if(!confirm('Cancel your booking?\n\n'+rec.machine+' — '+rec.when+'\n\nThe slot frees up for someone else straight away.'))return;
    btn.disabled=true;btn.textContent='cancelling…';
    fetch('/'+LAB+'/v1/cancel',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({id:rec.id,token:rec.token})})
@@ -207,7 +224,7 @@ document.getElementById('ok').onclick=function(){
  .catch(function(){m.className='msg no';m.textContent='network trouble'})};
 document.getElementById('apih').innerHTML=
  '<a href="/'+LAB+'/v1/slots?machine='+(MACH[0]||{}).id+'">GET /'+LAB+'/v1/slots</a> · POST /'+LAB+'/v1/book';
-renderDays();renderMine();load();
+renderDays();renderMine();syncMine();load();
 </script></body></html>`
 
 // machinesJSON is the board's machine list. Kept as config rather than derived,
