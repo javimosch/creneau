@@ -188,6 +188,10 @@ func serve(args []string) {
 	mux.HandleFunc("GET /{lab}/admin", labAdminPageHandler)
 	// Self-serve: a lab creates itself and administers it with a capability.
 	mux.HandleFunc("POST /v1/labs", createLabHandler)
+	// SSO for organizers. /auth/done is the single registered redirect_uri;
+	// which lab it belongs to comes from a server-side single-use nonce.
+	mux.HandleFunc("GET /auth/done", authDoneHandler)
+	mux.HandleFunc("GET /{lab}/auth/start", authStartHandler)
 	// Losing the admin token must not orphan a lab.
 	mux.HandleFunc("POST /v1/labs/recover", recoverStartHandler)
 	mux.HandleFunc("POST /v1/labs/recover/confirm", recoverConfirmHandler)

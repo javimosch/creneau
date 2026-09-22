@@ -6,6 +6,7 @@ package main
 // in localStorage.
 
 import (
+	"encoding/json"
 	"html"
 	"net/http"
 	"strings"
@@ -55,7 +56,8 @@ code{font-family:var(--mono);font-size:12.5px}
 .foot{color:var(--mut);font-size:12.5px;margin-top:8px}
 </style></head><body><div class="wrap">
 <div class="top"><div><h1 id="labname">__LAB__</h1><p class="sub" id="subline">admin</p></div>
-<button class="g hidden" id="out">Sign out</button></div>
+<span><a class="hidden" id="link" href="#" style="margin-right:10px;font-size:13.5px">Link this account</a>
+<button class="g hidden" id="out">Sign out</button></span></div>
 
 <div class="card" id="unlock">
   <h2>Unlock this lab</h2>
@@ -64,6 +66,10 @@ code{font-family:var(--mono);font-size:12.5px}
   <label for="key">Admin token</label>
   <input id="key" type="password" autocomplete="off" spellcheck="false">
   <div style="margin-top:12px"><button id="go">Unlock</button></div>
+  <div id="sso" class="hidden" style="margin-top:16px;padding-top:16px;border-top:1px solid var(--bd)">
+    <p class="h" style="margin:0 0 10px">Or sign in as an organizer:</p>
+    <div id="ssobtns"></div>
+  </div>
   <div class="msg" id="umsg"></div>
   <p class="foot">Lost it? <code>POST /v1/labs/recover</code> with your lab id or signup email.</p>
 </div>
@@ -104,7 +110,7 @@ code{font-family:var(--mono);font-size:12.5px}
 </div>
 </div>
 <script>
-var LAB='__LABID__', SK='creneau.session.'+LAB, sess=null;
+var LAB='__LABID__', SK='creneau.session.'+LAB, sess=null, PROVIDERS=__PROVIDERS__;
 function api(path,opts){opts=opts||{};opts.headers=opts.headers||{};
  if(sess)opts.headers['Authorization']='Bearer '+sess;
  if(opts.body)opts.headers['Content-Type']='application/json';
@@ -127,6 +133,9 @@ function unlock(){
  .catch(function(){say('umsg','Network trouble.','no')})}
 
 function enter(exp){
+ if(PROVIDERS.length){var lk=document.getElementById('link');
+  lk.href='/'+LAB+'/auth/start?link='+encodeURIComponent(sess)+'&provider='+encodeURIComponent(PROVIDERS[0]);
+  lk.textContent='Link my '+PROVIDERS[0]+' account';lk.classList.remove('hidden')}
  document.getElementById('unlock').classList.add('hidden');
  document.getElementById('app').classList.remove('hidden');
  document.getElementById('out').classList.remove('hidden');
@@ -231,6 +240,16 @@ function signout(){
  document.getElementById('subline').textContent='admin';
  say('umsg','Signed out. The session was revoked on the server.','ok')}
 
+if(PROVIDERS.length){
+ var box=document.getElementById('ssobtns');
+ PROVIDERS.forEach(function(p){
+  var a=document.createElement('a');
+  a.href='/'+LAB+'/auth/start?provider='+encodeURIComponent(p);
+  a.textContent='Sign in with '+p;
+  a.style.cssText='display:inline-block;margin:0 8px 8px 0;padding:9px 15px;border:1px solid var(--bd);'+
+   'border-radius:8px;text-decoration:none;color:var(--ink);font-weight:600;font-size:14px';
+  box.appendChild(a)});
+ document.getElementById('sso').classList.remove('hidden')}
 document.getElementById('go').onclick=unlock;
 document.getElementById('key').addEventListener('keydown',function(e){if(e.key==='Enter')unlock()});
 document.getElementById('add').onclick=addMachine;
@@ -256,6 +275,13 @@ func labAdminPageHandler(w http.ResponseWriter, r *http.Request) {
 	page := adminHTML
 	page = strings.ReplaceAll(page, "__LAB__", html.EscapeString(l.Name))
 	page = strings.ReplaceAll(page, "__LABID__", l.ID)
+	provs := "[]"
+	if ssoEnabled() {
+		if b, err := json.Marshal(ssoProviders()); err == nil {
+			provs = string(b)
+		}
+	}
+	page = strings.ReplaceAll(page, "__PROVIDERS__", provs)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Robots-Tag", "noindex")
