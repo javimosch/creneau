@@ -52,12 +52,17 @@ td{padding:9px 8px 9px 0;border-top:1px solid var(--bd);vertical-align:middle}
 border:1px solid var(--bd);border-radius:99px;padding:3px 8px;color:var(--mut)}
 .top{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap}
 .hidden{display:none}
+.tabs{display:flex;gap:6px;margin:6px 0 14px;flex-wrap:wrap}
+.tab{background:transparent;color:var(--mut);border:1px solid var(--bd);border-radius:999px;
+ padding:7px 15px;font-size:14px;font-weight:600;cursor:pointer}
+.tab.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.agent code{display:block;background:var(--bg);border:1px solid var(--bd);border-radius:8px;
+ padding:10px;margin:8px 0;word-break:break-all;white-space:pre-wrap}
 code{font-family:var(--mono);font-size:12.5px}
 .foot{color:var(--mut);font-size:12.5px;margin-top:8px}
 </style></head><body><div class="wrap">
 <div class="top"><div><h1 id="labname">__LAB__</h1><p class="sub" id="subline">admin</p></div>
 <span><a id="pub" href="/__LABID__" style="margin-right:10px;font-size:13.5px">View the public board &rarr;</a>
-<a class="hidden lnk" id="link" href="#" style="margin-right:10px;font-size:13.5px">Link this account</a>
 <button class="g hidden" id="out">Sign out</button></span></div>
 
 <div class="card" id="unlock">
@@ -77,6 +82,13 @@ code{font-family:var(--mono);font-size:12.5px}
 </div>
 
 <div id="app" class="hidden">
+  <div class="tabs" role="tablist">
+    <button class="tab on" data-tab="machines" role="tab">Machines</button>
+    <button class="tab" data-tab="bookings" role="tab">Bookings</button>
+    <button class="tab" data-tab="access" role="tab">Access</button>
+  </div>
+
+  <div class="panel" id="p-machines">
   <div class="card">
     <h2>Machines</h2>
     <p class="h">Your machines and when they can be booked. Closing a day (for maintenance,
@@ -84,14 +96,6 @@ code{font-family:var(--mono);font-size:12.5px}
     <table><thead><tr><th>Machine</th><th>Booking length</th><th>Gap between</th><th>Hours</th><th>Days open</th><th></th></tr></thead>
     <tbody id="machines"></tbody></table>
     <div class="msg" id="mmsg"></div>
-  </div>
-
-  <div class="card">
-    <h2>Access</h2>
-    <p class="h">Who can manage this board. Linking an account means you sign in with it instead of pasting the token.</p>
-    <div id="access"></div>
-    <div style="margin-top:12px"><button class="g" id="mkagent">Give this board a robot account</button></div>
-    <div class="msg" id="gmsg"></div>
   </div>
 
   <div class="card">
@@ -111,6 +115,28 @@ code{font-family:var(--mono);font-size:12.5px}
     <div class="msg" id="amsg"></div>
   </div>
 
+  </div><!-- /p-machines -->
+
+  <div class="panel hidden" id="p-access">
+  <div class="card">
+    <h2>Who can manage this board</h2>
+    <p class="h">Link an account and you sign in with it instead of pasting the admin token.</p>
+    <div id="access"></div>
+    <div id="linkrow" style="margin-top:12px"></div>
+    <div class="msg" id="gmsg"></div>
+  </div>
+
+  <div class="card">
+    <h2>Robot account</h2>
+    <p class="h">A login for software rather than a person — a booking bot, a door controller,
+    a script that opens next week's slots. It signs in without a browser, and it works at every
+    intrane app, not just this board.</p>
+    <div id="agentbox"></div>
+    <div class="msg" id="rmsg"></div>
+  </div>
+  </div><!-- /p-access -->
+
+  <div class="panel hidden" id="p-bookings">
   <div class="card">
     <h2>Bookings <span class="pill" id="bcount"></span></h2>
     <p class="h">Every booking made on this board. Cancelling frees the slot immediately.</p>
@@ -146,16 +172,17 @@ function unlock(){
 function enter(exp){
  // One link per configured provider. This used to hardcode PROVIDERS[0], so with
  // intrane first there was no way to attach a google or github identity at all.
- if(PROVIDERS.length){var lk=document.getElementById('link');
-  var host=lk.parentNode;
-  PROVIDERS.forEach(function(p,i){
-   var a=(i===0)?lk:lk.cloneNode(false);
-   if(i>0)a.removeAttribute('id');   // cloneNode copies the id — duplicates are invalid
-   a.setAttribute('data-prov',p);
+ // The link offers belong beside the owner list they change, not in the header.
+ if(PROVIDERS.length){var host=document.getElementById('linkrow');
+  host.innerHTML='';
+  PROVIDERS.forEach(function(p){
+   var a=document.createElement('a');
+   a.className='lnk';a.setAttribute('data-prov',p);
+   a.style.cssText='display:inline-block;margin:0 8px 8px 0;padding:8px 14px;'+
+    'border:1px solid var(--bd);border-radius:8px;text-decoration:none;color:inherit;font-size:13.5px';
    a.href='/'+LAB+'/auth/start?link='+encodeURIComponent(sess)+'&provider='+encodeURIComponent(p);
    a.textContent='Link my '+p+' account';
-   a.classList.remove('hidden');
-   if(i>0)host.insertBefore(a,lk.nextSibling)})}
+   host.appendChild(a)})}
  document.getElementById('unlock').classList.add('hidden');
  document.getElementById('app').classList.remove('hidden');
  document.getElementById('out').classList.remove('hidden');
@@ -223,7 +250,10 @@ function load(){
   var ac=document.getElementById('access');
   var ows=(l.owners||[]);
   // An account you have already linked should not keep offering to link it.
-  var linked={};ows.forEach(function(o){if(o.provider)linked[o.provider]=1});
+  // The lab's own robot is an owner via intrane. Counting it would mark intrane
+  // as "linked" when no person has linked anything, and hide the offer you want.
+  var linked={};ows.forEach(function(o){
+   if(o.provider && o.email!==(l.agent_handle||''))linked[o.provider]=1});
   document.querySelectorAll('.lnk').forEach(function(a){
    var pv=a.getAttribute('data-prov');if(!pv)return;
    if(linked[pv]){a.textContent='\u2713 '+pv+' linked';a.removeAttribute('href');
@@ -235,11 +265,9 @@ function load(){
   if(!ows.length){h2+='<tr><td colspan="2" style="color:var(--mut)">No accounts linked yet — you are signed in with the admin token.</td></tr>'}
   ows.forEach(function(o){h2+='<tr><td>'+esc(o.email||o.sub)+'</td><td><code>'+esc(o.provider)+'</code></td></tr>'});
   h2+='</tbody></table>';
-  if(l.agent_handle){h2+='<p class="h" style="margin-top:10px">Agent identity: <code>'+esc(l.agent_handle)+
-    '</code> — the password was shown once, when you created it.</p>'}
+  renderAgent(l.agent_handle||'');
   if(l.trial_ends){h2+='<p class="h" style="margin:4px 0 0">Trial ends '+esc(l.trial_ends.slice(0,10))+'.</p>'}
   ac.innerHTML=h2;
-  document.getElementById('mkagent').disabled=!!l.agent_handle;
 
   var bt=document.getElementById('bookings');bt.innerHTML='';
   document.getElementById('bcount').textContent=x.j.count+' confirmed';
@@ -291,6 +319,52 @@ if(PROVIDERS.length){
    'border-radius:8px;text-decoration:none;color:var(--ink);font-weight:600;font-size:14px';
   box.appendChild(a)});
  document.getElementById('sso').classList.remove('hidden')}
+function renderAgent(handle){
+ var box=document.getElementById('agentbox');if(!box)return;
+ if(!handle){
+  box.innerHTML='<p class="h">This board does not have one yet.</p>';
+  var mk=document.createElement('button');mk.className='g';mk.textContent='Create a robot account';
+  mk.onclick=makeAgent;box.appendChild(mk);return}
+ box.className='agent';
+ box.innerHTML=
+  '<p class="h">Username: <code>'+esc(handle)+'</code></p>'+
+  '<p class="h">Give the password to your script once; it signs in with no browser:</p>'+
+  '<code>curl -u \''+esc(handle)+':PASSWORD\' \\\n  \'https://idp.intrane.fr/authorize?response_type=code&amp;client_id=…\'</code>'+
+  '<p class="h">Lost the password? It cannot be read back — issue a new one, which stops the old '+
+  'one working. Revoking deletes the account entirely.</p>';
+ var row=document.createElement('div');row.style.marginTop='10px';
+ var rot=document.createElement('button');rot.className='g';rot.textContent='Issue a new password';
+ rot.style.marginRight='8px';rot.onclick=rotateAgent;
+ var rev=document.createElement('button');rev.className='g';rev.textContent='Revoke this account';
+ rev.onclick=revokeAgent;
+ row.appendChild(rot);row.appendChild(rev);box.appendChild(row)}
+
+function showSecret(title,handle,pw){
+ var box=document.getElementById('agentbox');box.className='agent';
+ box.innerHTML='<p class="h"><b>'+title+'</b> Copy it now — it is never shown again.</p>'+
+  '<p class="h">Username: <code>'+esc(handle)+'</code></p>'+
+  '<p class="h">Password:</p><code>'+esc(pw)+'</code>'+
+  '<p class="h">Use them together as HTTP Basic auth against '+
+  '<code>https://idp.intrane.fr/authorize</code>.</p>';
+ var d=document.createElement('button');d.className='g';d.textContent='Done, I saved it';
+ d.onclick=function(){load()};box.appendChild(d)}
+
+function rotateAgent(){
+ if(!confirm('Issue a new password? Anything using the current one stops working.'))return;
+ api('/v1/agent/rotate',{method:'POST'}).then(function(x){
+  if(x.s!==200){say('rmsg',(x.j.error&&x.j.error.message)||'Could not issue a new password.','no');return}
+  showSecret('New password issued.',x.j.handle,x.j.password)})}
+
+function revokeAgent(){
+ if(!confirm('Delete this robot account? Anything signing in with it stops working.'))return;
+ api('/v1/agent',{method:'DELETE'}).then(function(x){
+  if(x.s!==200){say('rmsg',(x.j.error&&x.j.error.message)||'Could not revoke it.','no');return}
+  say('rmsg','Revoked.','ok');load()})}
+
+document.querySelectorAll('.tab').forEach(function(b){b.onclick=function(){
+ document.querySelectorAll('.tab').forEach(function(x){x.classList.toggle('on',x===b)});
+ var want='p-'+b.getAttribute('data-tab');
+ document.querySelectorAll('.panel').forEach(function(pn){pn.classList.toggle('hidden',pn.id!==want)})}});
 document.getElementById('go').onclick=unlock;
 var rc=document.getElementById('recov');
 if(rc){rc.onclick=function(e){e.preventDefault();
@@ -301,17 +375,11 @@ if(rc){rc.onclick=function(e){e.preventDefault();
  .then(function(){say('umsg','If this board has an email on file, a recovery link is on its way. It lasts 30 minutes.','ok')})
  .catch(function(){say('umsg','Network trouble — try again.','no')})}}
 document.getElementById('key').addEventListener('keydown',function(e){if(e.key==='Enter')unlock()});
-document.getElementById('mkagent').onclick=function(){
- var b=this;b.disabled=true;say('gmsg','minting…');
+function makeAgent(){
+ say('rmsg','Creating…');
  api('/v1/agent',{method:'POST'}).then(function(x){
-  if(x.s!==200){b.disabled=false;say('gmsg',(x.j.error&&x.j.error.message)||'Could not create it.','no');return}
-  say('gmsg','');
-  document.getElementById('access').insertAdjacentHTML('beforeend',
-   '<div class="tokbox" style="margin-top:12px;border:1px solid var(--bd);border-radius:9px;background:var(--s2);padding:12px 14px">'+
-   '<b style="display:block;font-size:12.5px;margin-bottom:6px">Agent credential — shown once</b>'+
-   '<code style="display:block;word-break:break-all">'+esc(x.j.handle)+'</code>'+
-   '<code style="display:block;word-break:break-all;margin-top:4px">'+esc(x.j.password)+'</code>'+
-   '<p class="h" style="margin:8px 0 0">'+esc(x.j.note||'')+'</p></div>')})};
+  if(x.s!==200){say('rmsg',(x.j.error&&x.j.error.message)||'Could not create it.','no');return}
+  say('rmsg','');showSecret('Robot account created.',x.j.handle,x.j.password)})}
 document.getElementById('add').onclick=addMachine;
 document.getElementById('out').onclick=signout;
 try{var saved=JSON.parse(localStorage.getItem(SK)||'null');
