@@ -140,8 +140,13 @@ func createLabHandler(w http.ResponseWriter, r *http.Request) {
 
 	c := newBkn()
 	if _, err := c.get(ns, "labs", id); err == nil {
+		// A returning organizer lands here, not a name collision: they retype the
+		// lab they already created. Telling them only "taken" is a dead end, so
+		// point at the way back in and at recovery for a forgotten id.
 		writeErr(w, http.StatusConflict, "conflict",
-			"the id "+id+" is taken; pass your own \"id\"")
+			"the id "+id+" is taken. If it is yours, sign in at "+selfURL()+"/"+id+
+				"/admin — or POST /v1/labs/recover {\"email\":\"<your signup email>\"} "+
+				"to get a code by mail. Otherwise pass a different \"id\".")
 		return
 	}
 	tok, err := manageToken()
