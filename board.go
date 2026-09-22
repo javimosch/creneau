@@ -6,6 +6,8 @@ package main
 // Same origin as the API, so it needs no CORS.
 
 import (
+	"encoding/json"
+	"html"
 	"net/http"
 	"strings"
 )
@@ -88,8 +90,7 @@ color:var(--no);font:600 12.5px var(--sans);cursor:pointer}
 <div class="legend"><span><i></i>free — click to book</span><span><i class="t"></i>taken</span>
 <span id="stat"></span></div></div>
 <p class="api">Same two calls an agent makes:
-<a href="/v1/slots?event=laser&amp;from=2026-10-06&amp;to=2026-10-06">GET /v1/slots</a> ·
-POST /v1/book · <a href="/guide">GET /guide</a></p>
+<span id="apih"></span> · <a href="/guide">GET /guide</a></p>
 </div>
 <dialog id="dlg"><div class="dlg">
 <h2 id="dt">Book</h2><p id="dp"></p>
@@ -98,6 +99,7 @@ POST /v1/book · <a href="/guide">GET /guide</a></p>
 <div class="msg" id="dm"></div>
 </div></dialog>
 <script>
+var LAB='__LABID__';
 var MACH=__MACHINES__, HOURS=[], day=0, DAYS=[], pick=null;
 function iso(d){return d.toISOString().slice(0,10)}
 for(var i=0;i<7;i++){var d=new Date();d.setDate(d.getDate()+i);DAYS.push({date:iso(d),
@@ -109,7 +111,7 @@ b.setAttribute('aria-pressed',i===day?'true':'false');b.onclick=function(){day=i
 function load(){document.getElementById('stat').textContent='loading…';
 var date=DAYS[day].date, done=0; slots={};
 MACH.forEach(function(m){
- fetch('/v1/slots?event='+encodeURIComponent(m.id)+'&from='+date+'&to='+date)
+ fetch('/'+LAB+'/v1/slots?machine='+encodeURIComponent(m.id)+'&from='+date+'&to='+date)
  .then(function(r){return r.json()}).then(function(j){slots[m.id]=(j.slots||[]).map(function(s){return s.start})})
  .catch(function(){slots[m.id]=[]})
  .finally(function(){if(++done===MACH.length){buildHours();render()}})})}
@@ -143,7 +145,7 @@ function render(){
  document.getElementById('stat').textContent=HOURS.length?'':'nothing bookable on this day';
  document.getElementById('tzline').textContent='Times shown in UTC as returned by the API · '+MACH.length+' machines';
 }
-var LS='creneau.bookings';
+var LS='creneau.bookings.'+LAB;
 function mine(){try{return JSON.parse(localStorage.getItem(LS)||'[]')}catch(e){return[]}}
 function remember(b,m,label){try{var a=mine();
  a.push({id:b.id,token:b.manage_token,machine:m,when:label,start:b.start});
@@ -162,7 +164,7 @@ function renderMine(){
    var id=btn.getAttribute('data-cancel'),rec=mine().filter(function(x){return x.id===id})[0];
    if(!rec){forget(id);renderMine();return}
    btn.disabled=true;btn.textContent='cancelling…';
-   fetch('/v1/cancel',{method:'POST',headers:{'Content-Type':'application/json'},
+   fetch('/'+LAB+'/v1/cancel',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({id:rec.id,token:rec.token})})
    .then(function(r){return r.json().then(function(j){return{s:r.status,j:j}})})
    .then(function(x){
@@ -180,33 +182,65 @@ document.getElementById('ok').onclick=function(){
  var who=document.getElementById('who').value.trim(),m=document.getElementById('dm');
  if(!who){m.className='msg no';m.textContent='an email is required';return}
  m.className='msg';m.textContent='booking…';
- fetch('/v1/book',{method:'POST',headers:{'Content-Type':'application/json'},
-  body:JSON.stringify({event:pick.m.id,at:pick.at,who:who})})
+ fetch('/'+LAB+'/v1/book',{method:'POST',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({machine:pick.m.id,at:pick.at,who:who})})
  .then(function(r){return r.json().then(function(j){return{s:r.status,j:j}})})
  .then(function(x){if(x.s===200){m.className='msg ok';m.textContent='Booked. See you then.';
    remember(x.j.booking||{},pick.m.name,DAYS[day].label+' at '+pick.h);renderMine();
    setTimeout(function(){dlg.close();load()},900)}
   else{m.className='msg no';m.textContent=(x.j.error&&x.j.error.message)||'could not book';if(x.s===409){load()}}})
  .catch(function(){m.className='msg no';m.textContent='network trouble'})};
+document.getElementById('apih').innerHTML=
+ '<a href="/'+LAB+'/v1/slots?machine='+(MACH[0]||{}).id+'">GET /'+LAB+'/v1/slots</a> · POST /'+LAB+'/v1/book';
 renderDays();renderMine();load();
 </script></body></html>`
 
 // machinesJSON is the board's machine list. Kept as config rather than derived,
 // because the display name and the order are a lab's choice, not the engine's.
-func boardPage(lab, machinesJSON string) string {
-	s := strings.ReplaceAll(boardHTML, "__LAB__", lab)
-	return strings.ReplaceAll(s, "__MACHINES__", machinesJSON)
+func boardPage(l lab) string {
+	ms := make([]map[string]any, 0, len(l.Machines))
+	for _, m := range l.Machines {
+		ms = append(ms, map[string]any{"id": m.ID, "name": m.Name})
+	}
+	j, _ := json.Marshal(ms)
+	s := strings.ReplaceAll(boardHTML, "__LAB__", html.EscapeString(l.Name))
+	s = strings.ReplaceAll(s, "__LABID__", l.ID)
+	return strings.ReplaceAll(s, "__MACHINES__", string(j))
 }
 
-func boardHandler(lab, machinesJSON string) http.HandlerFunc {
-	page := boardPage(lab, machinesJSON)
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" {
-			writeErr(w, http.StatusNotFound, "no_such_route", "not found")
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Cache-Control", "public, max-age=60")
-		_, _ = w.Write([]byte(page))
+// labBoardHandler serves one lab's board. The machine list comes from the lab
+// record, not from env, which is what makes a second lab a data change rather
+// than another deployment.
+func labBoardHandler(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("lab")
+	if validLabID(id) != nil {
+		writeErr(w, http.StatusNotFound, "not_found", "no such lab")
+		return
 	}
+	l, err := loadLab(newBkn(), id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "not_found", "no such lab "+id)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=30")
+	_, _ = w.Write([]byte(boardPage(l)))
+}
+
+// labIndexHandler answers the bare host. It lists nothing by default: a lab's
+// board is not a directory entry, and creneau is not a marketplace.
+func labIndexHandler(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		writeErr(w, http.StatusNotFound, "not_found", "not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":      true,
+		"service": "creneau",
+		"message": "each lab has its own board at /<lab>",
+		"routes": []string{
+			"GET /<lab>", "GET /<lab>/v1/slots?machine=<id>&from=<date>&to=<date>",
+			"POST /<lab>/v1/book", "POST /<lab>/v1/cancel", "GET /guide",
+		},
+	})
 }

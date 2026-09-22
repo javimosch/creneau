@@ -51,6 +51,8 @@ func main() {
 	switch os.Args[1] {
 	case "serve":
 		serve(os.Args[2:])
+	case "lab":
+		labCmd(os.Args[2:])
 	case "install":
 		install(os.Args[2:])
 	case "availability":
@@ -178,14 +180,11 @@ func serve(args []string) {
 	}
 
 	mux := http.NewServeMux()
-	// The human board, when a lab is configured. Static client, same origin.
-	if lab := os.Getenv("CRENEAU_LAB"); lab != "" {
-		machines := os.Getenv("CRENEAU_MACHINES")
-		if machines == "" {
-			machines = "[]"
-		}
-		mux.HandleFunc("GET /", boardHandler(lab, machines))
-	}
+	// Every public surface is lab-scoped: /{lab} is the board and
+	// /{lab}/v1/... is its API. The lab id is part of the path because it is
+	// part of the calendar key, so a request cannot forget which tenant it is.
+	mux.HandleFunc("GET /", labIndexHandler)
+	mux.HandleFunc("GET /{lab}", labBoardHandler)
 	mux.HandleFunc("GET /_health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "service": "creneau", "pid": os.Getpid()})
 	})
@@ -198,13 +197,22 @@ func serve(args []string) {
 	// The public booking page: a stranger reads slots and books one without
 	// an account. Both are unauthenticated on purpose; everything that needs
 	// an organizer is a CLI verb, not a route.
-	mux.HandleFunc("GET /v1/slots", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /{lab}/v1/slots", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
-		event, from, to := q.Get("event"), q.Get("from"), q.Get("to")
+		labID := r.PathValue("lab")
+		event, from, to := q.Get("machine"), q.Get("from"), q.Get("to")
 		if event == "" {
-			writeErr(w, http.StatusBadRequest, "missing_argument", "event is required")
+			event = q.Get("event") // the pre-tenancy name, still accepted
+		}
+		if event == "" {
+			writeErr(w, http.StatusBadRequest, "missing_argument", "machine is required")
 			return
 		}
+		if _, err := loadLab(newBkn(), labID); err != nil {
+			writeErr(w, http.StatusNotFound, "not_found", "no such lab "+labID)
+			return
+		}
+		event = calendarFor(labID, event)
 		if from == "" {
 			from = time.Now().UTC().Format("2006-01-02")
 		}
@@ -223,10 +231,10 @@ func serve(args []string) {
 	// Managing your own booking without an account: the capability is the token
 	// minted at book time, not a session. Wrong or missing token is a 403, and a
 	// booking that is already cancelled is a 409 rather than a quiet success.
-	mux.HandleFunc("GET /v1/booking/{id}", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /{lab}/v1/booking/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id, tok := r.PathValue("id"), r.URL.Query().Get("t")
 		rec, err := newBkn().get(ns, "bookings", id)
-		if err != nil {
+		if err != nil || !ownedBy(rec, r.PathValue("lab")) {
 			writeErr(w, http.StatusNotFound, "not_found", "no such booking")
 			return
 		}
@@ -237,7 +245,7 @@ func serve(args []string) {
 		delete(rec, "manage_token")
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "booking": rec})
 	})
-	mux.HandleFunc("POST /v1/cancel", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /{lab}/v1/cancel", func(w http.ResponseWriter, r *http.Request) {
 		var in struct{ ID, Token string }
 		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&in); err != nil {
 			writeErr(w, http.StatusBadRequest, "invalid_body", "body must be JSON")
@@ -249,7 +257,7 @@ func serve(args []string) {
 		}
 		c := newBkn()
 		rec, err := c.get(ns, "bookings", in.ID)
-		if err != nil {
+		if err != nil || !ownedBy(rec, r.PathValue("lab")) {
 			writeErr(w, http.StatusNotFound, "not_found", "no such booking")
 			return
 		}
@@ -269,17 +277,31 @@ func serve(args []string) {
 		delete(out, "manage_token")
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "booking": out})
 	})
-	mux.HandleFunc("POST /v1/book", func(w http.ResponseWriter, r *http.Request) {
-		var body struct{ Event, At, Who, Name string }
+	mux.HandleFunc("POST /{lab}/v1/book", func(w http.ResponseWriter, r *http.Request) {
+		var body struct{ Machine, Event, At, Who, Name string }
 		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&body); err != nil {
 			writeErr(w, http.StatusBadRequest, "invalid_body", "body must be a JSON object")
 			return
 		}
+		labID := r.PathValue("lab")
+		if body.Machine != "" {
+			body.Event = body.Machine
+		}
 		if body.Event == "" || body.At == "" || body.Who == "" {
-			writeErr(w, http.StatusBadRequest, "missing_argument", "event, at and who are required")
+			writeErr(w, http.StatusBadRequest, "missing_argument", "machine, at and who are required")
 			return
 		}
-		rec, err := book(newBkn(), body.Event, body.At, body.Who, body.Name)
+		c := newBkn()
+		l, lerr := loadLab(c, labID)
+		if lerr != nil {
+			writeErr(w, http.StatusNotFound, "not_found", "no such lab "+labID)
+			return
+		}
+		if _, ok := l.machineByID(body.Event); !ok {
+			writeErr(w, http.StatusNotFound, "not_found", "no machine "+body.Event+" in "+labID)
+			return
+		}
+		rec, err := book(c, calendarFor(labID, body.Event), body.At, body.Who, body.Name)
 		if err != nil {
 			writeBknErr(w, err)
 			return

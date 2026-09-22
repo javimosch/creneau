@@ -1,0 +1,250 @@
+package main
+
+// Tenancy rides on the key that already decides everything: the calendar.
+//
+// A machine's calendar was already its resource ("the calendar IS the resource"),
+// and the booking lease is already `creneau-cal-<calendar>`. So scoping a calendar
+// to `<lab>:<machine>` makes two labs independent for free — no change to the
+// conflict query, no change to the lease, no new contention. The lab id is part
+// of the key, not a filter that could be forgotten.
+
+import (
+	"flag"
+	"fmt"
+	"os"
+	"regexp"
+	"strings"
+	"time"
+)
+
+// A lab id lands in URLs and in calendar keys, so keep it boring.
+var labIDRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$`)
+
+// reserved paths that can never be a lab id, because they are routes
+var reservedLabIDs = map[string]bool{
+	"v1": true, "_health": true, "guide": true, "version": true,
+	"favicon.ico": true, "robots.txt": true, "admin": true, "api": true,
+}
+
+type machine struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Minutes  int    `json:"minutes"`
+	Cooldown int    `json:"cooldown"`
+}
+
+type lab struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	TZ        string    `json:"tz"`
+	Machines  []machine `json:"machines"`
+	CreatedAt string    `json:"created_at"`
+}
+
+// calendarFor is the one place the tenancy key is built. Everything else —
+// availability ids, event ids, booking filters, the lease — derives from it.
+func calendarFor(labID, machineID string) string { return labID + ":" + machineID }
+
+func validLabID(id string) error {
+	if !labIDRe.MatchString(id) {
+		return fmt.Errorf("a lab id is 3-40 chars of a-z, 0-9 and hyphens, starting and ending alphanumeric")
+	}
+	if reservedLabIDs[id] {
+		return fmt.Errorf("%q is a reserved path", id)
+	}
+	return nil
+}
+
+func labFrom(d doc) lab {
+	l := lab{
+		ID:        asStr(d["id"]),
+		Name:      asStr(d["name"]),
+		TZ:        asStr(d["tz"]),
+		CreatedAt: asStr(d["created_at"]),
+	}
+	if raw, ok := d["machines"].([]any); ok {
+		for _, m := range raw {
+			md, ok := m.(map[string]any)
+			if !ok {
+				continue
+			}
+			l.Machines = append(l.Machines, machine{
+				ID: asStr(md["id"]), Name: asStr(md["name"]),
+				Minutes: asInt(md["minutes"]), Cooldown: asInt(md["cooldown"]),
+			})
+		}
+	}
+	return l
+}
+
+func loadLab(c *bkn, id string) (lab, error) {
+	d, err := c.get(ns, "labs", id)
+	if err != nil {
+		return lab{}, err
+	}
+	return labFrom(d), nil
+}
+
+func (l lab) machineByID(id string) (machine, bool) {
+	for _, m := range l.Machines {
+		if m.ID == id {
+			return m, true
+		}
+	}
+	return machine{}, false
+}
+
+// --- CLI ------------------------------------------------------------------
+
+func labCmd(args []string) {
+	if len(args) == 0 {
+		fail(exitUsage, "missing_argument", "lab needs a subcommand",
+			"creneau lab create <id> --name '...' | lab list | lab show <id> | lab add-machine <id> <machine>")
+	}
+	switch args[0] {
+	case "create":
+		labCreate(args[1:])
+	case "list":
+		labList()
+	case "show":
+		labShow(args[1:])
+	case "add-machine":
+		labAddMachine(args[1:])
+	default:
+		fail(exitUsage, "invalid_value", "unknown lab subcommand "+args[0],
+			"creneau lab create|list|show|add-machine")
+	}
+}
+
+func labCreate(args []string) {
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		fail(exitUsage, "missing_argument", "lab create needs an id",
+			"creneau lab create chambery --name 'Fablab Chambéry'")
+	}
+	id := args[0]
+	fs := flag.NewFlagSet("lab create", flag.ExitOnError)
+	name := fs.String("name", "", "display name")
+	tz := fs.String("tz", "Europe/Paris", "IANA timezone")
+	_ = fs.Parse(args[1:])
+	if err := validLabID(id); err != nil {
+		fail(exitUsage, "invalid_value", err.Error())
+	}
+	if *name == "" {
+		*name = id
+	}
+	c := newBkn()
+	if _, err := c.get(ns, "labs", id); err == nil {
+		fail(exitConflict, "conflict", "lab "+id+" already exists", "creneau lab show "+id)
+	}
+	rec, err := c.put(ns, "labs", id, doc{
+		"id": id, "name": *name, "tz": *tz,
+		"machines": []any{}, "created_at": time.Now().UTC().Format(stamp),
+	})
+	if err != nil {
+		failBkn(err)
+	}
+	out(map[string]any{"ok": true, "lab": rec, "board": "/" + id})
+}
+
+func labList() {
+	c := newBkn()
+	recs, err := c.list(ns, "labs", nil)
+	if err != nil {
+		failBkn(err)
+	}
+	labs := make([]map[string]any, 0, len(recs))
+	for _, r := range recs {
+		l := labFrom(r)
+		labs = append(labs, map[string]any{
+			"id": l.ID, "name": l.Name, "machines": len(l.Machines), "board": "/" + l.ID,
+		})
+	}
+	out(map[string]any{"ok": true, "count": len(labs), "labs": labs})
+}
+
+func labShow(args []string) {
+	if len(args) == 0 {
+		fail(exitUsage, "missing_argument", "lab show needs an id")
+	}
+	l, err := loadLab(newBkn(), args[0])
+	if err != nil {
+		failBkn(err)
+	}
+	out(map[string]any{"ok": true, "lab": l, "board": "/" + l.ID})
+}
+
+// labAddMachine registers a machine AND provisions the two records that make it
+// bookable — its own availability and its own event type, both keyed on the
+// tenancy calendar. One verb, so a lab cannot end up half-configured.
+func labAddMachine(args []string) {
+	if len(args) < 2 || strings.HasPrefix(args[1], "-") {
+		fail(exitUsage, "missing_argument", "add-machine needs a lab id and a machine id",
+			"creneau lab add-machine chambery laser --name 'Trotec Speedy 400' --minutes 60 --cooldown 15")
+	}
+	labID, machID := args[0], args[1]
+	fs := flag.NewFlagSet("add-machine", flag.ExitOnError)
+	name := fs.String("name", "", "display name")
+	minutes := fs.Int("minutes", 60, "slot length")
+	cooldown := fs.Int("cooldown", 0, "minutes blocked after each job")
+	open := fs.String("open", "09:00-18:00", "daily opening hours")
+	days := fs.String("days", "mon,tue,wed,thu,fri,sat", "days the machine is available")
+	_ = fs.Parse(args[2:])
+	if !labIDRe.MatchString(machID) {
+		fail(exitUsage, "invalid_value", "a machine id is a-z, 0-9 and hyphens")
+	}
+	if *name == "" {
+		*name = machID
+	}
+
+	c := newBkn()
+	l, err := loadLab(c, labID)
+	if err != nil {
+		fail(exitUnavailable, "not_found", "no such lab "+labID, "creneau lab create "+labID)
+	}
+	if _, exists := l.machineByID(machID); exists {
+		fail(exitConflict, "conflict", "machine "+machID+" already exists in "+labID)
+	}
+
+	cal := calendarFor(labID, machID)
+	rules := doc{}
+	for _, d := range strings.Split(*days, ",") {
+		if d = strings.TrimSpace(d); d != "" {
+			rules[d] = []string{*open}
+		}
+	}
+	if _, err := c.put(ns, "availability", cal, doc{
+		"calendar": cal, "tz": l.TZ, "rules": rules, "overrides": doc{},
+	}); err != nil {
+		failBkn(err)
+	}
+	if _, err := c.put(ns, "events", cal, doc{
+		"slug": cal, "calendar": cal, "minutes": *minutes,
+		"buffer_before": 0, "buffer_after": *cooldown,
+		"min_notice_minutes": 0, "daily_cap": 0,
+	}); err != nil {
+		failBkn(err)
+	}
+
+	l.Machines = append(l.Machines, machine{ID: machID, Name: *name, Minutes: *minutes, Cooldown: *cooldown})
+	ms := make([]any, 0, len(l.Machines))
+	for _, m := range l.Machines {
+		ms = append(ms, doc{"id": m.ID, "name": m.Name, "minutes": m.Minutes, "cooldown": m.Cooldown})
+	}
+	if _, err := c.put(ns, "labs", labID, doc{
+		"id": l.ID, "name": l.Name, "tz": l.TZ, "machines": ms, "created_at": l.CreatedAt,
+	}); err != nil {
+		failBkn(err)
+	}
+	fmt.Fprintf(os.Stderr, "[lab] %s now has %d machines\n", labID, len(l.Machines))
+	out(map[string]any{"ok": true, "lab": labID, "machine": machID, "calendar": cal, "board": "/" + labID})
+}
+
+// ownedBy keeps one lab from even naming another lab's booking. The manage
+// token already gates the action; this makes a cross-tenant id a 404 instead
+// of a 403, so ids from one lab reveal nothing about another.
+func ownedBy(rec doc, labID string) bool {
+	if labID == "" {
+		return false
+	}
+	return strings.HasPrefix(asStr(rec["calendar"]), labID+":")
+}

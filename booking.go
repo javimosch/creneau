@@ -32,7 +32,8 @@ func install(args []string) {
 	_ = fs.Parse(args)
 
 	c := newBkn()
-	for _, coll := range []string{"calendars", "availability", "events", "bookings"} {
+	colls := []string{"labs", "calendars", "availability", "events", "bookings"}
+	for _, coll := range colls {
 		if *dry {
 			fmt.Fprintf(os.Stderr, "  declare %s/%s\n", ns, coll)
 			continue
@@ -77,7 +78,7 @@ func install(args []string) {
 		_ = os.Remove(tmp.Name())
 		installed = append(installed, name)
 	}
-	out(map[string]any{"ok": true, "collections": 4, "scripts": installed, "bkn": c.base})
+	out(map[string]any{"ok": true, "collections": len(colls), "scripts": installed, "bkn": c.base})
 }
 
 // --- availability ---------------------------------------------------------
