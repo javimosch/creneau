@@ -220,6 +220,55 @@ func serve(args []string) {
 			"calendar": ev.Calendar, "count": len(slots), "slots": slots})
 	})
 
+	// Managing your own booking without an account: the capability is the token
+	// minted at book time, not a session. Wrong or missing token is a 403, and a
+	// booking that is already cancelled is a 409 rather than a quiet success.
+	mux.HandleFunc("GET /v1/booking/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id, tok := r.PathValue("id"), r.URL.Query().Get("t")
+		rec, err := newBkn().get(ns, "bookings", id)
+		if err != nil {
+			writeErr(w, http.StatusNotFound, "not_found", "no such booking")
+			return
+		}
+		if tok == "" || rec["manage_token"] != tok {
+			writeErr(w, http.StatusForbidden, "forbidden", "a valid manage token is required")
+			return
+		}
+		delete(rec, "manage_token")
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "booking": rec})
+	})
+	mux.HandleFunc("POST /v1/cancel", func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ ID, Token string }
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&in); err != nil {
+			writeErr(w, http.StatusBadRequest, "invalid_body", "body must be JSON")
+			return
+		}
+		if in.ID == "" || in.Token == "" {
+			writeErr(w, http.StatusBadRequest, "missing_argument", "id and token are required")
+			return
+		}
+		c := newBkn()
+		rec, err := c.get(ns, "bookings", in.ID)
+		if err != nil {
+			writeErr(w, http.StatusNotFound, "not_found", "no such booking")
+			return
+		}
+		if rec["manage_token"] != in.Token {
+			writeErr(w, http.StatusForbidden, "forbidden", "a valid manage token is required")
+			return
+		}
+		out, cerr := cancelBooking(c, in.ID)
+		if cerr != nil {
+			if be, ok := cerr.(*bknError); ok && be.Status == http.StatusConflict {
+				writeErr(w, http.StatusConflict, "conflict", "this booking is not confirmed any more")
+				return
+			}
+			writeErr(w, http.StatusBadGateway, "upstream", cerr.Error())
+			return
+		}
+		delete(out, "manage_token")
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "booking": out})
+	})
 	mux.HandleFunc("POST /v1/book", func(w http.ResponseWriter, r *http.Request) {
 		var body struct{ Event, At, Who, Name string }
 		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&body); err != nil {

@@ -5,7 +5,9 @@ package main
 // because `lock` has no HTTP route (docs/ledger.md rows 1-2).
 
 import (
+	"crypto/rand"
 	"embed"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"net/url"
@@ -274,16 +276,41 @@ func book(c *bkn, eventSlug, at, who, name string) (doc, error) {
 	}
 	end := start.Add(time.Duration(ev.Minutes) * time.Minute)
 
+	// The member has no account, so the booking carries its own capability: a
+	// 128-bit token minted here. It is what lets whoever booked cancel it later
+	// without logging in, and it is why the id alone is not enough — ids are
+	// ULIDs and therefore time-ordered and partly guessable.
+	tok, terr := manageToken()
+	if terr != nil {
+		return nil, terr
+	}
 	res, err := scriptResult(c.run("creneau-book", map[string]any{
 		"calendar": ev.Calendar, "event": ev.Slug,
 		"start": start.UTC().Format(stamp), "end": end.UTC().Format(stamp),
-		"who": who, "name": name,
+		"who": who, "name": name, "manage_token": tok,
 	}))
 	if err != nil {
 		return nil, err
 	}
 	b, _ := res["booking"].(map[string]any)
 	return b, nil
+}
+
+// manageToken mints the per-booking capability handed back to whoever booked.
+func manageToken() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
+// cancelBooking is the compare-and-set behind both `creneau cancel` and the
+// public POST /v1/cancel. Cancelling twice is a conflict, not a silent success.
+func cancelBooking(c *bkn, id string) (doc, error) {
+	return c.patchIf(ns, "bookings", id,
+		doc{"status": "cancelled", "cancelled_at": time.Now().UTC().Format(stamp)},
+		map[string]string{"status": "confirmed"})
 }
 
 func cancelCmd(args []string) {
@@ -293,9 +320,7 @@ func cancelCmd(args []string) {
 	c := newBkn()
 	// A plain compare-and-set: cancelling twice is a conflict, not a silent
 	// success, and this one needs no script.
-	rec, err := c.patchIf(ns, "bookings", args[0],
-		doc{"status": "cancelled", "cancelled_at": time.Now().UTC().Format(stamp)},
-		map[string]string{"status": "confirmed"})
+	rec, err := cancelBooking(c, args[0])
 	if err != nil {
 		failBkn(err)
 	}

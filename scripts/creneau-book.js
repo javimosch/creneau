@@ -31,6 +31,7 @@ function main(input) {
       start: start,
       end: end,
       who: input.who || "",
+      manage_token: input.manage_token || "",
       name: input.name || "",
       status: "confirmed",
       rescheduled_from: input.rescheduled_from || "",

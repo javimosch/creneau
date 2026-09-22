@@ -13,6 +13,7 @@ import (
 const boardHTML = `<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E%F0%9F%9B%A0%EF%B8%8F%3C/text%3E%3C/svg%3E">
 <title>__LAB__ — machine board</title>
 <style>
 :root{--bg:#fbfbfc;--surf:#fff;--s2:#f2f4f7;--s3:#e6eaed;--ink:#0f1318;--mut:#59626d;
@@ -66,11 +67,22 @@ button.g{padding:10px 15px;border-radius:9px;border:1px solid var(--bd);backgrou
 color:var(--ink);font:500 14px var(--sans);cursor:pointer}
 .msg{font-size:13px;min-height:18px;margin-top:8px}
 .msg.ok{color:var(--ok)}.msg.no{color:var(--no)}
+.mine{border:1px solid var(--bd);border-radius:11px;background:var(--surf);padding:14px 16px;margin-bottom:16px}
+.mine h3{margin:0 0 9px;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)}
+.mb{display:flex;align-items:center;gap:12px;justify-content:space-between;
+padding:8px 0;border-top:1px solid var(--bd);font-size:14px;flex-wrap:wrap}
+.mb:first-of-type{border-top:0}
+.mb .w{color:var(--mut);font-size:13px}
+.mb button{padding:6px 12px;border-radius:7px;border:1px solid var(--bd);background:transparent;
+color:var(--no);font:600 12.5px var(--sans);cursor:pointer}
+.mb button:hover{border-color:var(--no)}
+.mb.done{opacity:.55}
 .api{margin-top:16px;font:12px var(--mono);color:var(--mut)}
 .api a{color:var(--ac)}
 </style></head><body><div class="wrap">
 <header><h1>__LAB__ — machine board</h1></header>
 <p class="sub" id="tzline"></p>
+<div id="mine"></div>
 <div class="days" id="days"></div>
 <div class="frame"><div class="scr"><table><thead id="th"></thead><tbody id="tb"></tbody></table></div>
 <div class="legend"><span><i></i>free — click to book</span><span><i class="t"></i>taken</span>
@@ -131,6 +143,34 @@ function render(){
  document.getElementById('stat').textContent=HOURS.length?'':'nothing bookable on this day';
  document.getElementById('tzline').textContent='Times shown in UTC as returned by the API · '+MACH.length+' machines';
 }
+var LS='creneau.bookings';
+function mine(){try{return JSON.parse(localStorage.getItem(LS)||'[]')}catch(e){return[]}}
+function remember(b,m,label){try{var a=mine();
+ a.push({id:b.id,token:b.manage_token,machine:m,when:label,start:b.start});
+ localStorage.setItem(LS,JSON.stringify(a))}catch(e){}}
+function forget(id){try{localStorage.setItem(LS,JSON.stringify(mine().filter(function(x){return x.id!==id})))}catch(e){}}
+function renderMine(){
+ var host=document.getElementById('mine'),a=mine();
+ if(!a.length){host.innerHTML='';return}
+ var h='<div class="mine"><h3>Your bookings</h3>';
+ a.forEach(function(x){
+  h+='<div class="mb" data-id="'+x.id+'"><span><b>'+x.machine+'</b> <span class="w">'+x.when+'</span></span>'+
+     '<button data-cancel="'+x.id+'">Cancel</button></div>'});
+ host.innerHTML=h+'</div>';
+ host.querySelectorAll('[data-cancel]').forEach(function(btn){
+  btn.onclick=function(){
+   var id=btn.getAttribute('data-cancel'),rec=mine().filter(function(x){return x.id===id})[0];
+   if(!rec){forget(id);renderMine();return}
+   btn.disabled=true;btn.textContent='cancelling…';
+   fetch('/v1/cancel',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({id:rec.id,token:rec.token})})
+   .then(function(r){return r.json().then(function(j){return{s:r.status,j:j}})})
+   .then(function(x){
+     if(x.s===200||x.s===409){forget(id);renderMine();load()}
+     else{btn.disabled=false;btn.textContent='Cancel';
+      alert((x.j.error&&x.j.error.message)||'could not cancel')}})
+   .catch(function(){btn.disabled=false;btn.textContent='Cancel'})}})}
+
 var dlg=document.getElementById('dlg');
 function open_(){document.getElementById('dt').textContent='Book '+pick.m.name;
 document.getElementById('dp').textContent=DAYS[day].label+' at '+pick.h;
@@ -144,10 +184,11 @@ document.getElementById('ok').onclick=function(){
   body:JSON.stringify({event:pick.m.id,at:pick.at,who:who})})
  .then(function(r){return r.json().then(function(j){return{s:r.status,j:j}})})
  .then(function(x){if(x.s===200){m.className='msg ok';m.textContent='Booked. See you then.';
+   remember(x.j.booking||{},pick.m.name,DAYS[day].label+' at '+pick.h);renderMine();
    setTimeout(function(){dlg.close();load()},900)}
   else{m.className='msg no';m.textContent=(x.j.error&&x.j.error.message)||'could not book';if(x.s===409){load()}}})
  .catch(function(){m.className='msg no';m.textContent='network trouble'})};
-renderDays();load();
+renderDays();renderMine();load();
 </script></body></html>`
 
 // machinesJSON is the board's machine list. Kept as config rather than derived,
