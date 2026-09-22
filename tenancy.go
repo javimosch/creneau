@@ -205,38 +205,12 @@ func labAddMachine(args []string) {
 		fail(exitConflict, "conflict", "machine "+machID+" already exists in "+labID)
 	}
 
-	cal := calendarFor(labID, machID)
-	rules := doc{}
-	for _, d := range strings.Split(*days, ",") {
-		if d = strings.TrimSpace(d); d != "" {
-			rules[d] = []string{*open}
-		}
-	}
-	if _, err := c.put(ns, "availability", cal, doc{
-		"calendar": cal, "tz": l.TZ, "rules": rules, "overrides": doc{},
-	}); err != nil {
+	if err := provisionMachine(c, l, machID, *name, *minutes, *cooldown, *open, *days); err != nil {
 		failBkn(err)
 	}
-	if _, err := c.put(ns, "events", cal, doc{
-		"slug": cal, "calendar": cal, "minutes": *minutes,
-		"buffer_before": 0, "buffer_after": *cooldown,
-		"min_notice_minutes": 0, "daily_cap": 0,
-	}); err != nil {
-		failBkn(err)
-	}
-
-	l.Machines = append(l.Machines, machine{ID: machID, Name: *name, Minutes: *minutes, Cooldown: *cooldown})
-	ms := make([]any, 0, len(l.Machines))
-	for _, m := range l.Machines {
-		ms = append(ms, doc{"id": m.ID, "name": m.Name, "minutes": m.Minutes, "cooldown": m.Cooldown})
-	}
-	if _, err := c.put(ns, "labs", labID, doc{
-		"id": l.ID, "name": l.Name, "tz": l.TZ, "machines": ms, "created_at": l.CreatedAt,
-	}); err != nil {
-		failBkn(err)
-	}
+	l.Machines = append(l.Machines, machine{ID: machID, Name: *name})
 	fmt.Fprintf(os.Stderr, "[lab] %s now has %d machines\n", labID, len(l.Machines))
-	out(map[string]any{"ok": true, "lab": labID, "machine": machID, "calendar": cal, "board": "/" + labID})
+	out(map[string]any{"ok": true, "lab": labID, "machine": machID, "calendar": calendarFor(labID, machID), "board": "/" + labID})
 }
 
 // ownedBy keeps one lab from even naming another lab's booking. The manage

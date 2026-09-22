@@ -185,6 +185,10 @@ func serve(args []string) {
 	// part of the calendar key, so a request cannot forget which tenant it is.
 	mux.HandleFunc("GET /", labIndexHandler)
 	mux.HandleFunc("GET /{lab}", labBoardHandler)
+	// Self-serve: a lab creates itself and administers it with a capability.
+	mux.HandleFunc("POST /v1/labs", createLabHandler)
+	mux.HandleFunc("POST /{lab}/v1/machines", addMachineHandler)
+	mux.HandleFunc("GET /{lab}/v1/admin", adminViewHandler)
 	mux.HandleFunc("GET /_health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "service": "creneau", "pid": os.Getpid()})
 	})
