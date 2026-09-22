@@ -307,3 +307,93 @@ func ssoPage(w http.ResponseWriter, labID, title, detail string) {
 <p style="color:#5a6472">` + detail + `</p>
 <p><a href="` + back + `">Back to the admin page</a></p></body>`))
 }
+
+// --- per-lab agent identity ------------------------------------------------
+
+// mintAgentHandler gives a lab one agent identity at idp.intrane.fr, so the
+// lab's own automation can administer it — and, because the identity is an IdP
+// principal rather than a creneau token, sign in to any other app brokered
+// through portier. That cross-app reach is the whole point.
+//
+// creneau holds a credential that can mint identities, so the blast radius is
+// bounded deliberately:
+//   - the handle is DERIVED from the lab id, never taken from the caller, so a
+//     compromised session cannot choose `someone@intrane.fr`;
+//   - one agent per lab, so a compromised session cannot mint without limit;
+//   - the IdP itself refuses anything but kind=agent, and an agent cannot use
+//     the browser sign-in form, so none of this can produce a human login.
+func mintAgentHandler(w http.ResponseWriter, r *http.Request) {
+	c := newBkn()
+	l, ok := labSession(r, c)
+	if !ok {
+		writeErr(w, http.StatusForbidden, "forbidden", "a valid session or admin token is required")
+		return
+	}
+	adm := os.Getenv("IDP_ADMIN_TOKEN")
+	idp := os.Getenv("IDP_URL")
+	if idp == "" {
+		idp = "https://idp.intrane.fr"
+	}
+	if adm == "" {
+		writeErr(w, http.StatusNotImplemented, "unconfigured",
+			"agent identities are not enabled on this instance")
+		return
+	}
+	labDoc, err := c.get(ns, "labs", l.ID)
+	if err != nil {
+		writeBknErr(w, err)
+		return
+	}
+	if h := asStr(labDoc["agent_handle"]); h != "" {
+		writeErr(w, http.StatusConflict, "conflict",
+			"this lab already has the agent "+h+" — its password cannot be shown again")
+		return
+	}
+	handle := "lab-" + l.ID + "@agents.intrane.fr"
+
+	body, _ := json.Marshal(map[string]string{"handle": handle, "name": l.Name + " agent"})
+	req, rerr := http.NewRequest("POST", strings.TrimRight(idp, "/")+"/v1/agents", strings.NewReader(string(body)))
+	if rerr != nil {
+		writeErr(w, http.StatusInternalServerError, "internal", rerr.Error())
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+adm)
+	req.Header.Set("Content-Type", "application/json")
+	resp, herr := (&http.Client{Timeout: 20 * time.Second}).Do(req)
+	if herr != nil {
+		writeErr(w, http.StatusBadGateway, "upstream", "the identity provider is unreachable")
+		return
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+	if resp.StatusCode >= 300 {
+		writeErr(w, http.StatusBadGateway, "upstream",
+			"the identity provider refused: "+strings.TrimSpace(string(raw)))
+		return
+	}
+	var out struct{ Sub, Handle, Password string }
+	if err := json.Unmarshal(raw, &out); err != nil || out.Password == "" {
+		writeErr(w, http.StatusBadGateway, "upstream", "unexpected reply from the identity provider")
+		return
+	}
+	// Record the handle and make the agent an owner, so it can sign in through
+	// portier immediately. The password is never stored — it is shown once here.
+	if _, err := c.patchIf(ns, "labs", l.ID, doc{"agent_handle": out.Handle}, nil); err != nil {
+		writeBknErr(w, err)
+		return
+	}
+	labDoc["agent_handle"] = out.Handle
+	if err := addOwner(c, l.ID, labDoc, identity{
+		Sub: out.Sub, Email: out.Handle, Provider: "intrane",
+	}); err != nil {
+		writeBknErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "handle": out.Handle, "password": out.Password, "sub": out.Sub,
+		"note": "shown once and not recoverable. This identity works at every app on " + idp +
+			", not only creneau.",
+		"headless_login": "curl -u '" + out.Handle + ":<password>' '" + idp +
+			"/authorize?response_type=code&client_id=<cid>&redirect_uri=<uri>&scope=openid%20email&state=x'",
+	})
+}

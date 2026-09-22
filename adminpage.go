@@ -84,6 +84,14 @@ code{font-family:var(--mono);font-size:12.5px}
   </div>
 
   <div class="card">
+    <h2>Access</h2>
+    <p class="h">Who can administer this lab, and the lab's own agent identity.</p>
+    <div id="access"></div>
+    <div style="margin-top:12px"><button class="g" id="mkagent">Create the lab's agent identity</button></div>
+    <div class="msg" id="gmsg"></div>
+  </div>
+
+  <div class="card">
     <h2>Add a machine</h2>
     <p class="h">It becomes bookable immediately, on its own calendar.</p>
     <div class="row">
@@ -200,6 +208,18 @@ function load(){
       {method:'POST',body:JSON.stringify({day:day,reopen:reopen})})
     .then(function(x){ say('mmsg', x.s===200 ? (reopen?'Reopened '+day+'.':'Closed '+day+' on '+id+'.')
       : ((x.j.error&&x.j.error.message)||'Could not change that day.'), x.s===200?'ok':'no')})}});
+  var ac=document.getElementById('access');
+  var ows=(l.owners||[]);
+  var h2='<table><thead><tr><th>Owner</th><th>Via</th></tr></thead><tbody>';
+  if(!ows.length){h2+='<tr><td colspan="2" style="color:var(--mut)">No linked accounts yet — you are using the admin token.</td></tr>'}
+  ows.forEach(function(o){h2+='<tr><td>'+esc(o.email||o.sub)+'</td><td><code>'+esc(o.provider)+'</code></td></tr>'});
+  h2+='</tbody></table>';
+  if(l.agent_handle){h2+='<p class="h" style="margin-top:10px">Agent identity: <code>'+esc(l.agent_handle)+
+    '</code> — its password was shown once when created.</p>'}
+  if(l.trial_ends){h2+='<p class="h" style="margin:4px 0 0">Trial ends '+esc(l.trial_ends.slice(0,10))+'.</p>'}
+  ac.innerHTML=h2;
+  document.getElementById('mkagent').disabled=!!l.agent_handle;
+
   var bt=document.getElementById('bookings');bt.innerHTML='';
   document.getElementById('bcount').textContent=x.j.count+' confirmed';
   if(!x.j.bookings.length){bt.innerHTML='<tr><td colspan="4" style="color:var(--mut)">Nothing booked yet.</td></tr>'}
@@ -252,6 +272,17 @@ if(PROVIDERS.length){
  document.getElementById('sso').classList.remove('hidden')}
 document.getElementById('go').onclick=unlock;
 document.getElementById('key').addEventListener('keydown',function(e){if(e.key==='Enter')unlock()});
+document.getElementById('mkagent').onclick=function(){
+ var b=this;b.disabled=true;say('gmsg','minting…');
+ api('/v1/agent',{method:'POST'}).then(function(x){
+  if(x.s!==200){b.disabled=false;say('gmsg',(x.j.error&&x.j.error.message)||'Could not create it.','no');return}
+  say('gmsg','');
+  document.getElementById('access').insertAdjacentHTML('beforeend',
+   '<div class="tokbox" style="margin-top:12px;border:1px solid var(--bd);border-radius:9px;background:var(--s2);padding:12px 14px">'+
+   '<b style="display:block;font-size:12.5px;margin-bottom:6px">Agent credential — shown once</b>'+
+   '<code style="display:block;word-break:break-all">'+esc(x.j.handle)+'</code>'+
+   '<code style="display:block;word-break:break-all;margin-top:4px">'+esc(x.j.password)+'</code>'+
+   '<p class="h" style="margin:8px 0 0">'+esc(x.j.note||'')+'</p></div>')})};
 document.getElementById('add').onclick=addMachine;
 document.getElementById('out').onclick=signout;
 try{var saved=JSON.parse(localStorage.getItem(SK)||'null');

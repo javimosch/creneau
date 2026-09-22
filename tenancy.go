@@ -39,6 +39,12 @@ type lab struct {
 	TZ        string    `json:"tz"`
 	Machines  []machine `json:"machines"`
 	CreatedAt string    `json:"created_at"`
+	// Who can administer this lab, and its agent identity. Without these the
+	// admin view silently dropped them, so an organizer could not see who had
+	// access — the owners were stored correctly, just invisible.
+	Owners      []owner `json:"owners"`
+	AgentHandle string  `json:"agent_handle,omitempty"`
+	TrialEnds   string  `json:"trial_ends,omitempty"`
 }
 
 // calendarFor is the one place the tenancy key is built. Everything else —
@@ -57,10 +63,13 @@ func validLabID(id string) error {
 
 func labFrom(d doc) lab {
 	l := lab{
-		ID:        asStr(d["id"]),
-		Name:      asStr(d["name"]),
-		TZ:        asStr(d["tz"]),
-		CreatedAt: asStr(d["created_at"]),
+		ID:          asStr(d["id"]),
+		Name:        asStr(d["name"]),
+		TZ:          asStr(d["tz"]),
+		CreatedAt:   asStr(d["created_at"]),
+		Owners:      ownersOf(d),
+		AgentHandle: asStr(d["agent_handle"]),
+		TrialEnds:   asStr(d["trial_ends"]),
 	}
 	if raw, ok := d["machines"].([]any); ok {
 		for _, m := range raw {
