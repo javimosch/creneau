@@ -397,3 +397,97 @@ func mintAgentHandler(w http.ResponseWriter, r *http.Request) {
 			"/authorize?response_type=code&client_id=<cid>&redirect_uri=<uri>&scope=openid%20email&state=x'",
 	})
 }
+
+// --- invite the organizer when a lab signs up ------------------------------
+
+// inviteOrganizer asks machin-idp for an invitation for the address the lab
+// signed up with, and mails it. Best effort by design: a lab must exist even if
+// the IdP is unreachable, so this never fails lab creation — it reports what
+// happened instead.
+//
+// The identity the invitation creates carries that same address, so the existing
+// owner check (email match) grants it on first sign-in. No separate linking step.
+func inviteOrganizer(labID, labName, email string) string {
+	adm := os.Getenv("IDP_ADMIN_TOKEN")
+	if adm == "" || email == "" {
+		return "skipped"
+	}
+	idp := os.Getenv("IDP_URL")
+	if idp == "" {
+		idp = "https://idp.intrane.fr"
+	}
+	body, _ := json.Marshal(map[string]any{
+		"handle": email, "name": labName + " organizer", "days": 14,
+		"invited_by": "creneau/" + labID,
+	})
+	req, err := http.NewRequest("POST", strings.TrimRight(idp, "/")+"/v1/invites", strings.NewReader(string(body)))
+	if err != nil {
+		return "error"
+	}
+	req.Header.Set("Authorization", "Bearer "+adm)
+	req.Header.Set("Content-Type", "application/json")
+	resp, herr := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	if herr != nil {
+		return "unreachable"
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+	// Already registered is not a failure: they have an identity, so they can
+	// simply sign in. Saying "exists" is more useful than saying "error".
+	if resp.StatusCode == http.StatusConflict {
+		return "already-registered"
+	}
+	if resp.StatusCode >= 300 {
+		return "refused"
+	}
+	var out struct {
+		InviteURL string `json:"invite_url"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil || out.InviteURL == "" {
+		return "error"
+	}
+	if err := sendInviteMail(email, labID, labName, out.InviteURL); err != nil {
+		return "created-not-mailed"
+	}
+	return "sent"
+}
+
+func sendInviteMail(to, labID, labName, inviteURL string) error {
+	key := os.Getenv("RESEND_API_KEY")
+	if key == "" {
+		return errString("RESEND_API_KEY not set")
+	}
+	from := os.Getenv("CRENEAU_MAIL_FROM")
+	if from == "" {
+		from = "creneau <javi@intrane.fr>"
+	}
+	board := selfURL() + "/" + labID
+	body, _ := json.Marshal(map[string]any{
+		"from": from, "to": []string{to},
+		"subject": labName + " — your board is ready",
+		"text": "Your machine board is live:\n\n  " + board + "\n\n" +
+			"Members book from that link. They need no account.\n\n" +
+			"To administer it — add machines, block maintenance days, see who booked —\n" +
+			"set a password for your intrane sign-in here:\n\n  " + inviteURL + "\n\n" +
+			"That link works once and expires in 14 days. Nobody else sets your password.\n" +
+			"Afterwards, sign in at " + selfURL() + "/" + labID + "/admin\n\n" +
+			"You can also administer the board with the admin token shown when you\n" +
+			"signed up, which keeps working whether or not you use the sign-in above.\n",
+	})
+	req, err := http.NewRequest("POST", "https://api.resend.com/emails", strings.NewReader(string(body)))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+key)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<12))
+		return errString("resend " + strings.TrimSpace(string(raw)))
+	}
+	return nil
+}

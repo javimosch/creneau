@@ -160,11 +160,14 @@ func createLabHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	delete(rec, "admin_token_hash")
+	// Best effort, and deliberately after the lab is durable: an unreachable
+	// IdP or mailer must not cost someone their board.
+	invited := inviteOrganizer(id, in.Name, in.Email)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "lab": rec, "board": "/" + id,
-		"admin_token": tok,
-		"note":        "save the admin token now — it is hashed on our side and cannot be shown again",
-		"next":        "POST /" + id + "/v1/machines with Authorization: Bearer <admin_token>",
+		"admin_token": tok, "invite": invited,
+		"note": "save the admin token now — it is hashed on our side and cannot be shown again",
+		"next": "POST /" + id + "/v1/machines with Authorization: Bearer <admin_token>",
 	})
 }
 
