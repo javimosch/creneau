@@ -357,7 +357,7 @@ func serve(args []string) {
 			"error": map[string]any{
 				"type":        "no_such_route",
 				"message":     "creneau serves the public booking surface only; organizer actions are CLI verbs",
-				"suggestions": []string{"GET /guide", "GET /v1/slots?event=<slug>", "POST /v1/book"},
+				"suggestions": []string{"GET /guide", "GET /{lab}/v1/slots?machine=<id>", "POST /{lab}/v1/book"},
 			},
 		})
 	})
@@ -434,7 +434,7 @@ func guide() map[string]any {
 			"setup":    []string{"creneau install [--bkn <path>] [--dry-run]"},
 			"organize": []string{"creneau availability set [--calendar c] [--tz Z] [--mon|--tue|--wed|--thu|--fri|--sat|--sun 09:00-12:00,13:00-17:00] [--closed 2026-12-25]", "creneau event create <slug> [--calendar c] [--minutes 30] [--buffer-before N] [--buffer-after N] [--min-notice 4h] [--daily-cap N]"},
 			"booking":  []string{"creneau slots --event <slug> [--from D] [--to D]", "creneau book --event <slug> --at <rfc3339> --who <email> [--name N]", "creneau cancel <id>", "creneau reschedule <id> --at <rfc3339>", "creneau bookings list [--calendar c] [--who e] [--upcoming] [--limit N]", "creneau reconcile [--dry-run]"},
-			"server":   []string{"creneau serve [--host H] [--port N] [--origin https://site]  # public: GET /v1/slots, POST /v1/book"},
+			"server":   []string{"creneau serve [--host H] [--port N] [--origin https://site]  # public: GET /{lab}/v1/slots, POST /{lab}/v1/book"},
 			"meta":     []string{"creneau guide", "creneau help-json", "creneau version"},
 		},
 		"exit_codes": map[string]any{
@@ -485,11 +485,29 @@ func helpJSON() map[string]any {
 			"BKN_URL":         "where bkn is, default http://127.0.0.1:7799",
 			"BKN_ADMIN_TOKEN": "bkn admin token, if that instance requires one",
 		},
+		// Tenancy moved every public route under /{lab}/. This block kept
+		// advertising /v1/slots and /v1/book, which both 404 — so an agent
+		// following the guide could not book at all. The guide is the agent-first
+		// surface: when it drifts, the product is broken for its primary caller.
 		"routes": map[string]any{
-			"GET /v1/slots": "public: ?event=<slug>&from=<date>&to=<date>",
-			"POST /v1/book": "public: {event, at, who, name}",
-			"GET /guide":    "this guide",
-			"GET /_health":  "liveness",
+			"GET /{lab}":                   "the board for one lab",
+			"GET /{lab}/v1/machines":       "not a route: machines come from GET /{lab} or the lab record",
+			"GET /{lab}/v1/slots":          "public: ?machine=<id>&from=<date>&to=<date> — times are UTC",
+			"POST /{lab}/v1/book":          "public: {machine, at, who, name} -> {booking, confirmation}",
+			"POST /{lab}/v1/cancel":        "public: {id, token} using the manage_token from booking",
+			"GET /{lab}/v1/booking/{id}":   "public: ?t=<manage_token> — read one booking",
+			"GET /{lab}/b/{id}":            "human page for one booking: ?t=<manage_token>",
+			"GET /{lab}/admin":             "organizer page",
+			"POST /v1/labs":                "self-serve signup: {name, email, id?, tz?}",
+			"POST /v1/labs/recover":        "{lab} or {email} — mails a recovery link",
+			"GET /guide":                   "this guide",
+			"GET /_health":                 "liveness",
+		},
+		"booking_flow": []string{
+			"1. GET /{lab} or the lab record for the machine ids",
+			"2. GET /{lab}/v1/slots?machine=<id>&from=<date>&to=<date>",
+			"3. POST /{lab}/v1/book {machine, at, who} -> booking.manage_token",
+			"4. POST /{lab}/v1/cancel {id, token} to give the slot back",
 		},
 		"exit_codes": map[string]any{
 			"0":   "success",

@@ -13,6 +13,11 @@ CONC=${2:-16}
 CRENEAU_URL=${CRENEAU_URL:-http://127.0.0.1:7801}
 BKN_DB=${BKN_DB:?set BKN_DB to the bkn SQLite file}
 EVENT=${EVENT:-intro-30}
+# Tenancy moved booking from /v1/book to /{lab}/v1/book. This harness kept
+# POSTing to the old path, so it was exercising a 404 rather than the atomic
+# step — a concurrency test that cannot reach the code under test reports a
+# clean run forever. LAB is required for that reason.
+LAB=${LAB:?set LAB to the lab id under test}
 
 command -v sqlite3 >/dev/null || { echo "sqlite3 is required to assert the invariant" >&2; exit 2; }
 
@@ -24,7 +29,16 @@ STARTS=(
   2026-11-02T09:45:00Z 2026-11-02T10:00:00Z 2026-11-02T10:15:00Z
 )
 
-echo "firing c=$CONC at $CRENEAU_URL for ${SECS}s over ${#STARTS[@]} overlapping starts"
+echo "firing c=$CONC at $CRENEAU_URL/$LAB for ${SECS}s over ${#STARTS[@]} overlapping starts"
+
+# A harness that cannot reach the endpoint reports a perfect score. Prove the
+# route answers before trusting a zero.
+probe=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$CRENEAU_URL/$LAB/v1/book" \
+  -H 'Content-Type: application/json' -d '{}')
+case "$probe" in
+  400|409|422) ;;                      # reached the handler, refused the body
+  *) echo "route probe returned $probe — the harness is not hitting the booking handler" >&2; exit 2;;
+esac
 end=$(( $(date +%s) + SECS ))
 tmp=$(mktemp -d)
 
@@ -33,9 +47,9 @@ worker() {
   while [ "$(date +%s)" -lt "$end" ]; do
     local at=${STARTS[$((RANDOM % ${#STARTS[@]}))]}
     local code
-    code=$(curl -s -o /dev/null -w '%{http_code}' -m 10 -X POST "$CRENEAU_URL/v1/book" \
+    code=$(curl -s -o /dev/null -w '%{http_code}' -m 10 -X POST "$CRENEAU_URL/$LAB/v1/book" \
       -H 'Content-Type: application/json' \
-      -d "{\"event\":\"$EVENT\",\"at\":\"$at\",\"who\":\"w$n@example.io\"}")
+      -d "{\"machine\":\"$EVENT\",\"at\":\"$at\",\"who\":\"w$n@example.io\"}")
     case "$code" in
       200) ok=$((ok+1));;
       409) conflict=$((conflict+1));;
@@ -74,6 +88,22 @@ confirmed=$(sqlite3 "file:$BKN_DB?mode=ro" "
 
 echo "  confirmed in store: $confirmed"
 echo "  overlapping pairs:  $overlaps"
+
+# Fail CLOSED. Both of these were observed printing "F6 PASSED": once when the
+# harness POSTed to a route tenancy had moved (every write 404ed), and once when
+# sqlite3 could not open the database, leaving $overlaps empty so the -ne 0 test
+# fell through. The invariant is asserted against the store, so a run that could
+# not read the store has proved nothing.
+case "$overlaps" in
+  ''|*[!0-9]*) echo "F6 INVALID — could not read the datastore (BKN_DB=$BKN_DB); nothing was asserted" >&2; exit 3;;
+esac
+case "$confirmed" in
+  ''|*[!0-9]*) echo "F6 INVALID — could not count confirmed bookings" >&2; exit 3;;
+esac
+if [ "$confirmed" -eq 0 ]; then
+  echo "F6 INVALID — the store holds no confirmed bookings, so nothing was contended" >&2
+  exit 3
+fi
 
 if [ "$overlaps" -ne 0 ]; then
   echo "F6 FAILED — $overlaps overlapping confirmed pairs. One is a failure." >&2

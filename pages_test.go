@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"regexp"
 	"strings"
 	"testing"
@@ -64,5 +65,30 @@ func TestPagesRenderInTheLabTimezone(t *testing.T) {
 	}
 	if strings.Contains(boardHTML, "as returned by the API") {
 		t.Error("boardHTML still claims times are shown in UTC")
+	}
+}
+
+// F5 (the agent-first criterion) failed on first measurement: tenancy moved
+// every public route under /{lab}/, but guide and help-json still advertised
+// /v1/slots and /v1/book — both 404. An agent following the documented path
+// could not book at all. The guide IS the agent-first surface, so drift in it
+// is a product outage for the primary caller, not a docs nit.
+func TestAgentSurfaceAdvertisesTenantRoutes(t *testing.T) {
+	blob, err := json.Marshal(map[string]any{"guide": guide(), "help": helpJSON()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(blob)
+	// A public path that is not lab-scoped is the bug.
+	stale := regexp.MustCompile(`(?:[^}>]|^)/v1/(?:slots|book|cancel)\b`)
+	for _, m := range stale.FindAllString(s, -1) {
+		if !strings.Contains(m, "lab") {
+			t.Errorf("agent surface advertises a non-tenant route %q; use /{lab}/v1/...", strings.TrimSpace(m))
+		}
+	}
+	for _, want := range []string{"/{lab}/v1/slots", "/{lab}/v1/book"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("agent surface never mentions %s — an agent cannot find the booking path", want)
+		}
 	}
 }
