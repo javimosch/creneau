@@ -30,6 +30,10 @@ const boardHTML = `<!DOCTYPE html>
 header{display:flex;align-items:baseline;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:6px}
 h1{font-size:21px;margin:0;letter-spacing:-.02em}
 .sub{color:var(--mut);font-size:13.5px;margin:2px 0 18px}
+.adm{display:inline-block;margin-top:6px;font-size:13.5px;text-decoration:none;
+ border:1px solid var(--bd);border-radius:8px;padding:6px 11px;color:inherit}
+.empty{padding:22px;text-align:center;color:var(--mut);font-size:14px;line-height:1.6}
+.empty a{color:inherit}
 .days{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:16px}
 .day{font:600 12.5px var(--sans);padding:7px 12px;border-radius:8px;border:1px solid var(--bd);
 background:var(--surf);color:var(--ink);cursor:pointer}
@@ -82,7 +86,8 @@ color:var(--no);font:600 12.5px var(--sans);cursor:pointer}
 .api{margin-top:16px;font:12px var(--mono);color:var(--mut)}
 .api a{color:var(--ac)}
 </style></head><body><div class="wrap">
-<header><h1>__LAB__ — machine board</h1></header>
+<header><h1>__LAB__ — machine board</h1>
+<a class="adm" href="/__LAB__/admin">Organizer? Manage this board &rarr;</a></header>
 <p class="sub" id="tzline"></p>
 <div id="mine"></div>
 <div class="days" id="days"></div>
@@ -110,6 +115,16 @@ DAYS.forEach(function(d,i){var b=document.createElement('button');b.className='d
 b.setAttribute('aria-pressed',i===day?'true':'false');b.onclick=function(){day=i;renderDays();load()};e.appendChild(b)})}
 function load(){document.getElementById('stat').textContent='loading…';
 var date=DAYS[day].date, done=0; slots={};
+// A brand-new lab has no machines, so this forEach body never runs and render()
+// was never reached — the board sat on "loading…" forever with no console error.
+if(!MACH.length){document.getElementById('stat').textContent='';
+ document.getElementById('tb').innerHTML='';
+ document.getElementById('th').innerHTML='';
+ var f=document.querySelector('.frame');
+ f.innerHTML='<div class="empty"><b>No machines yet.</b><br>'+
+  'Add your first machine on the <a href="/'+LAB+'/admin">admin page</a>, '+
+  'then members can book it here.</div>';
+ return}
 MACH.forEach(function(m){
  fetch('/'+LAB+'/v1/slots?machine='+encodeURIComponent(m.id)+'&from='+date+'&to='+date)
  .then(function(r){return r.json()}).then(function(j){slots[m.id]=(j.slots||[]).map(function(s){return s.start})})

@@ -141,9 +141,16 @@ function unlock(){
  .catch(function(){say('umsg','Network trouble.','no')})}
 
 function enter(exp){
+ // One link per configured provider. This used to hardcode PROVIDERS[0], so with
+ // intrane first there was no way to attach a google or github identity at all.
  if(PROVIDERS.length){var lk=document.getElementById('link');
-  lk.href='/'+LAB+'/auth/start?link='+encodeURIComponent(sess)+'&provider='+encodeURIComponent(PROVIDERS[0]);
-  lk.textContent='Link my '+PROVIDERS[0]+' account';lk.classList.remove('hidden')}
+  var host=lk.parentNode;
+  PROVIDERS.forEach(function(p,i){
+   var a=(i===0)?lk:lk.cloneNode(false);
+   a.href='/'+LAB+'/auth/start?link='+encodeURIComponent(sess)+'&provider='+encodeURIComponent(p);
+   a.textContent='Link my '+p+' account';
+   a.classList.remove('hidden');
+   if(i>0)host.insertBefore(a,lk.nextSibling)})}
  document.getElementById('unlock').classList.add('hidden');
  document.getElementById('app').classList.remove('hidden');
  document.getElementById('out').classList.remove('hidden');
