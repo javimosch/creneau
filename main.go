@@ -187,6 +187,9 @@ func serve(args []string) {
 	mux.HandleFunc("GET /{lab}", labBoardHandler)
 	// Self-serve: a lab creates itself and administers it with a capability.
 	mux.HandleFunc("POST /v1/labs", createLabHandler)
+	// Losing the admin token must not orphan a lab.
+	mux.HandleFunc("POST /v1/labs/recover", recoverStartHandler)
+	mux.HandleFunc("POST /v1/labs/recover/confirm", recoverConfirmHandler)
 	mux.HandleFunc("POST /{lab}/v1/machines", addMachineHandler)
 	mux.HandleFunc("GET /{lab}/v1/admin", adminViewHandler)
 	mux.HandleFunc("GET /_health", func(w http.ResponseWriter, r *http.Request) {
