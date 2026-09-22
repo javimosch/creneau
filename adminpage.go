@@ -275,9 +275,16 @@ func labAdminPageHandler(w http.ResponseWriter, r *http.Request) {
 	page := adminHTML
 	page = strings.ReplaceAll(page, "__LAB__", html.EscapeString(l.Name))
 	page = strings.ReplaceAll(page, "__LABID__", l.ID)
+	// Must be "[]" and never "null": json.Marshal of a nil slice yields null,
+	// and PROVIDERS.length on null throws, which would abort the whole page
+	// script — including the unlock handler.
 	provs := "[]"
 	if ssoEnabled() {
-		if b, err := json.Marshal(ssoProviders()); err == nil {
+		list := ssoProviders()
+		if list == nil {
+			list = []string{}
+		}
+		if b, err := json.Marshal(list); err == nil {
 			provs = string(b)
 		}
 	}
