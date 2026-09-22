@@ -104,11 +104,33 @@ color:var(--no);font:600 12.5px var(--sans);cursor:pointer}
 <div class="msg" id="dm"></div>
 </div></dialog>
 <script>
-var LAB='__LABID__';
+var LAB='__LABID__', TZ='__TZ__'||'UTC';
 var MACH=__MACHINES__, HOURS=[], day=0, DAYS=[], pick=null;
-function iso(d){return d.toISOString().slice(0,10)}
-for(var i=0;i<7;i++){var d=new Date();d.setDate(d.getDate()+i);DAYS.push({date:iso(d),
-label:d.toLocaleDateString(undefined,{weekday:'short',day:'numeric',month:'short'})})}
+
+// Everything is stored and served in UTC, but a fablab thinks in its own wall
+// clock: a 09:00-18:00 Paris day was being shown to guests as 07:00-16:00, and
+// the slot the workshop calls 14:00 read as 12:00. Availability already honours
+// the lab's zone server-side; this makes what people SEE agree with it.
+function tzParts(d){
+ try{
+  var f=new Intl.DateTimeFormat('en-CA',{timeZone:TZ,year:'numeric',month:'2-digit',
+   day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).formatToParts(d);
+  var g={};f.forEach(function(p){g[p.type]=p.value});
+  var hh=g.hour==='24'?'00':g.hour;
+  return{ymd:g.year+'-'+g.month+'-'+g.day,hm:hh+':'+g.minute}
+ }catch(e){ // unknown zone: fall back to UTC rather than render nothing
+  var i=d.toISOString();return{ymd:i.slice(0,10),hm:i.slice(11,16)}}}
+function hmOf(iso){return tzParts(new Date(iso)).hm}
+function ymdOf(iso){return tzParts(new Date(iso)).ymd}
+
+// The seven day buttons are the lab's days, not the viewer's — otherwise a
+// guest abroad sees a window shifted off the workshop's calendar.
+for(var i=0;i<7;i++){
+ var d=new Date(Date.now()+i*86400000);
+ var ymd=tzParts(d).ymd;
+ DAYS.push({date:ymd,
+  label:new Date(ymd+'T12:00:00Z').toLocaleDateString(undefined,
+   {weekday:'short',day:'numeric',month:'short',timeZone:'UTC'})})}
 var slots={};
 function renderDays(){var e=document.getElementById('days');e.innerHTML='';
 DAYS.forEach(function(d,i){var b=document.createElement('button');b.className='day';b.textContent=d.label;
@@ -133,7 +155,7 @@ MACH.forEach(function(m){
 var gran={};
 function buildHours(){var set={};gran={};
 Object.keys(slots).forEach(function(k){gran[k]={};
- slots[k].forEach(function(s){set[s.slice(11,16)]=1;gran[k][s.slice(14,16)]=1})});
+ slots[k].forEach(function(s){var hm=hmOf(s);set[hm]=1;gran[k][hm.slice(3,5)]=1})});
 HOURS=Object.keys(set).sort()}
 function render(){
  var th=document.getElementById('th');th.innerHTML='';
@@ -144,7 +166,7 @@ function render(){
  MACH.forEach(function(m){var r=document.createElement('tr');
   var td=document.createElement('td');td.className='mc';td.textContent=m.name;r.appendChild(td);
   HOURS.forEach(function(h){var c=document.createElement('td');c.className='cw';
-   var full=(slots[m.id]||[]).filter(function(s){return s.slice(11,16)===h})[0];
+   var full=(slots[m.id]||[]).filter(function(s){return hmOf(s)===h})[0];
    // A machine's grid is its own: a 60-min laser has no :30 slot, so that cell is
    // NOT "taken", it is not a slot. Showing "taken" there would be a false claim —
    // /v1/slots returns only free slots, so we can only honestly distinguish
@@ -158,7 +180,8 @@ function render(){
    c.appendChild(b);r.appendChild(c)});
   tb.appendChild(r)});
  document.getElementById('stat').textContent=HOURS.length?'':'nothing bookable on this day';
- document.getElementById('tzline').textContent='Times shown in UTC as returned by the API · '+MACH.length+' machines';
+ document.getElementById('tzline').textContent='Times shown in '+TZ+' · '+
+  MACH.length+(MACH.length===1?' machine':' machines');
 }
 var LS='creneau.bookings.'+LAB;
 function mine(){try{return JSON.parse(localStorage.getItem(LS)||'[]')}catch(e){return[]}}
@@ -241,6 +264,11 @@ func boardPage(l lab) string {
 	// every real lab. Use __LABID__ in every URL.
 	s := strings.ReplaceAll(boardHTML, "__LAB__", html.EscapeString(l.Name))
 	s = strings.ReplaceAll(s, "__LABID__", l.ID)
+	tz := l.TZ
+	if tz == "" {
+		tz = "UTC"
+	}
+	s = strings.ReplaceAll(s, "__TZ__", html.EscapeString(tz))
 	return strings.ReplaceAll(s, "__MACHINES__", string(j))
 }
 

@@ -148,6 +148,15 @@ code{font-family:var(--mono);font-size:12.5px}
 </div>
 <script>
 var LAB='__LABID__', SK='creneau.session.'+LAB, sess=null, PROVIDERS=__PROVIDERS__;
+var TZ='__TZ__'||'UTC';
+// Bookings are stored in UTC; an organizer reads the board in the workshop's
+// own clock, so showing raw UTC here puts the admin list two hours off the
+// times the guests were shown.
+function whenTZ(iso){
+ if(!iso)return '';
+ try{return new Intl.DateTimeFormat(undefined,{timeZone:TZ,weekday:'short',day:'numeric',
+  month:'short',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(iso))}
+ catch(e){return String(iso).replace('T',' ').replace('Z',' UTC')}}
 function api(path,opts){opts=opts||{};opts.headers=opts.headers||{};
  if(sess)opts.headers['Authorization']='Bearer '+sess;
  if(opts.body)opts.headers['Content-Type']='application/json';
@@ -274,7 +283,7 @@ function load(){
   if(!x.j.bookings.length){bt.innerHTML='<tr><td colspan="4" style="color:var(--mut)">Nothing booked yet.</td></tr>'}
   x.j.bookings.forEach(function(b){
    var tr=document.createElement('tr');
-   tr.innerHTML='<td><code>'+esc(b.machine)+'</code></td><td>'+esc((b.start||'').replace('T',' ').replace('Z',' UTC'))+
+   tr.innerHTML='<td><code>'+esc(b.machine)+'</code></td><td>'+esc(whenTZ(b.start))+
      '</td><td>'+esc(b.who)+'</td><td><button class="d" data-cancel="'+esc(b.id)+'">Cancel</button></td>';
    bt.appendChild(tr)});
   bt.querySelectorAll('[data-cancel]').forEach(function(b){
@@ -416,6 +425,11 @@ func labAdminPageHandler(w http.ResponseWriter, r *http.Request) {
 	page := adminHTML
 	page = strings.ReplaceAll(page, "__LAB__", html.EscapeString(l.Name))
 	page = strings.ReplaceAll(page, "__LABID__", l.ID)
+	tz := l.TZ
+	if tz == "" {
+		tz = "UTC"
+	}
+	page = strings.ReplaceAll(page, "__TZ__", html.EscapeString(tz))
 	// Must be "[]" and never "null": json.Marshal of a nil slice yields null,
 	// and PROVIDERS.length on null throws, which would abort the whole page
 	// script — including the unlock handler.

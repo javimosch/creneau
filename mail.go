@@ -138,11 +138,25 @@ func machineLabel(l lab, rec doc) string {
 	return id
 }
 
-// whenLabel renders a stored UTC timestamp the way a person reads a time.
-func whenLabel(rec doc) string {
+// whenLabel renders a stored UTC timestamp in the lab's own wall clock. A
+// fablab in Chambery does not think in UTC, and a confirmation email that is
+// two hours off the door sign is worse than no email.
+func whenLabel(l lab, rec doc) string {
 	w := asStr(rec["start"])
-	if len(w) >= 16 {
-		return strings.Replace(w[:16], "T", " at ", 1) + " UTC"
+	t, err := time.Parse(stamp, w)
+	if err != nil {
+		if len(w) >= 16 {
+			return strings.Replace(w[:16], "T", " at ", 1) + " UTC"
+		}
+		return w
 	}
-	return w
+	zone := l.TZ
+	if zone == "" {
+		zone = "UTC"
+	}
+	loc, lerr := time.LoadLocation(zone)
+	if lerr != nil {
+		loc = time.UTC
+	}
+	return t.In(loc).Format("Mon 2 Jan at 15:04 (MST)")
 }

@@ -37,7 +37,7 @@ func bookingPageHandler(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, "forbidden", "a valid manage link is required")
 		return
 	}
-	when := whenLabel(rec)
+	when := whenLabel(l, rec)
 	machine := machineLabel(l, rec)
 	page := strings.NewReplacer(
 		"__LABID__", labID,

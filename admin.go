@@ -236,7 +236,7 @@ func adminCancelHandler(w http.ResponseWriter, r *http.Request) {
 	notified := "skipped"
 	if who := asStr(out["who"]); who != "" {
 		if merr := sendCancelMail(who, l.ID, l.Name,
-			machineLabel(l, out), whenLabel(out), in.Message); merr == nil {
+			machineLabel(l, out), whenLabel(l, out), in.Message); merr == nil {
 			notified = "sent"
 		} else {
 			notified = "not-mailed"

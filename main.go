@@ -338,11 +338,7 @@ func serve(args []string) {
 		// somebody their slot. Undeliverable addresses are skipped inside.
 		mailed := "skipped"
 		if m, ok := l.machineByID(body.Event); ok {
-			when := asStr(rec["start"])
-			if len(when) >= 16 {
-				when = strings.Replace(when[:16], "T", " at ", 1) + " UTC"
-			}
-			if merr := sendBookingMail(body.Who, labID, l.Name, m.Name, when,
+			if merr := sendBookingMail(body.Who, labID, l.Name, m.Name, whenLabel(l, rec),
 				asStr(rec["id"]), asStr(rec["manage_token"])); merr == nil {
 				mailed = "sent"
 			} else {

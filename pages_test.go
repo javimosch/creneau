@@ -41,3 +41,28 @@ func TestTemplatesStillCarryBothPlaceholders(t *testing.T) {
 		t.Error("adminHTML no longer substitutes __LABID__")
 	}
 }
+
+// Times are stored in UTC and must be RENDERED in the lab's zone. The board
+// once told a Paris workshop its 09:00-18:00 day ran 07:00-16:00, because the
+// page sliced the UTC string directly. Guard the placeholder and the slicing.
+func TestPagesRenderInTheLabTimezone(t *testing.T) {
+	for name, tpl := range map[string]string{"boardHTML": boardHTML, "adminHTML": adminHTML} {
+		if !strings.Contains(tpl, "__TZ__") {
+			t.Errorf("%s: no __TZ__ placeholder — times would render in UTC", name)
+		}
+	}
+	// The bug was reading the UTC hour straight off a SLOT string. The one
+	// remaining slice(11,16) is the deliberate fallback inside tzParts for an
+	// unknown zone, so match the slot expressions specifically.
+	for _, bad := range []string{"s.slice(11,16)", "set[s.slice(", "return s.slice(11,16)==="} {
+		if strings.Contains(boardHTML, bad) {
+			t.Errorf("boardHTML still reads the UTC hour off a slot (%q); use hmOf()", bad)
+		}
+	}
+	if !strings.Contains(boardHTML, "hmOf(") {
+		t.Error("boardHTML does not convert slot times with hmOf()")
+	}
+	if strings.Contains(boardHTML, "as returned by the API") {
+		t.Error("boardHTML still claims times are shown in UTC")
+	}
+}
