@@ -197,6 +197,8 @@ func serve(args []string) {
 	mux.HandleFunc("POST /{lab}/v1/session", sessionStartHandler)
 	mux.HandleFunc("DELETE /{lab}/v1/session", sessionEndHandler)
 	mux.HandleFunc("POST /{lab}/v1/machines/{machine}/closures", closeDayHandler)
+	mux.HandleFunc("PATCH /{lab}/v1/machines/{machine}", editMachineHandler)
+	mux.HandleFunc("DELETE /{lab}/v1/machines/{machine}", deleteMachineHandler)
 	mux.HandleFunc("POST /{lab}/v1/admin/cancel", adminCancelHandler)
 	mux.HandleFunc("GET /_health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "service": "creneau", "pid": os.Getpid()})

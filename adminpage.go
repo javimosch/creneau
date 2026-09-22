@@ -72,7 +72,7 @@ code{font-family:var(--mono);font-size:12.5px}
   <div class="card">
     <h2>Machines</h2>
     <p class="h">Closing a day blocks new bookings on that machine. It does not cancel bookings already made.</p>
-    <table><thead><tr><th>Machine</th><th>Slot</th><th>Cooldown</th><th>Close a day</th></tr></thead>
+    <table><thead><tr><th>Machine</th><th>Slot</th><th>Cool</th><th>Open</th><th>Days</th><th></th></tr></thead>
     <tbody id="machines"></tbody></table>
     <div class="msg" id="mmsg"></div>
   </div>
@@ -141,12 +141,46 @@ function load(){
   var mt=document.getElementById('machines');mt.innerHTML='';
   (l.machines||[]).forEach(function(m){
    var tr=document.createElement('tr');
-   tr.innerHTML='<td><b>'+esc(m.name)+'</b><br><code>'+esc(m.id)+'</code></td>'+
-     '<td>'+(m.minutes||60)+' min</td><td>'+(m.cooldown||0)+' min</td>'+
-     '<td><input type="date" data-day="'+esc(m.id)+'" style="max-width:150px">'+
-     ' <button class="d" data-close="'+esc(m.id)+'">Close</button>'+
-     ' <button class="g" data-open="'+esc(m.id)+'" style="padding:6px 11px;font-size:12.5px">Reopen</button></td>';
-   mt.appendChild(tr)});
+   var i=esc(m.id);
+   tr.innerHTML='<td><input data-f="name" data-m="'+i+'" value="'+esc(m.name)+'" style="min-width:150px">'+
+     '<br><code>'+i+'</code></td>'+
+     '<td><input data-f="minutes" data-m="'+i+'" type="number" value="'+(m.minutes||60)+'" style="width:72px"></td>'+
+     '<td><input data-f="cooldown" data-m="'+i+'" type="number" value="'+(m.cooldown||0)+'" style="width:72px"></td>'+
+     '<td><input data-f="open" data-m="'+i+'" placeholder="09:00-18:00" style="width:120px"></td>'+
+     '<td><input data-f="days" data-m="'+i+'" placeholder="mon,tue,…" style="width:150px"></td>'+
+     '<td style="white-space:nowrap"><button data-save="'+i+'" style="padding:6px 11px;font-size:12.5px">Save</button> '+
+     '<button class="d" data-del="'+i+'">Remove</button></td>';
+   mt.appendChild(tr);
+   var tr2=document.createElement('tr');
+   tr2.innerHTML='<td colspan="6" style="border-top:0;padding-top:0">'+
+     '<span style="color:var(--mut);font-size:12.5px">maintenance:</span> '+
+     '<input type="date" data-day="'+i+'" style="max-width:150px;display:inline-block;width:auto"> '+
+     '<button class="d" data-close="'+i+'">Close day</button> '+
+     '<button class="g" data-open="'+i+'" style="padding:6px 11px;font-size:12.5px">Reopen</button></td>';
+   mt.appendChild(tr2)});
+  mt.querySelectorAll('[data-save]').forEach(function(b){
+   b.onclick=function(){
+    var id=b.getAttribute('data-save'), body={};
+    mt.querySelectorAll('[data-m="'+id+'"]').forEach(function(f){
+     var k=f.getAttribute('data-f'), v=f.value.trim();
+     if(v==='')return;
+     body[k]=(k==='minutes'||k==='cooldown')?parseInt(v,10):v});
+    b.disabled=true;b.textContent='…';
+    api('/v1/machines/'+encodeURIComponent(id),{method:'PATCH',body:JSON.stringify(body)})
+    .then(function(x){ b.disabled=false;b.textContent='Save';
+     say('mmsg', x.s===200?('Saved '+id+'. Bookings already made are unchanged.')
+       :((x.j.error&&x.j.error.message)||'Could not save.'), x.s===200?'ok':'no');
+     if(x.s===200)load()})}});
+  mt.querySelectorAll('[data-del]').forEach(function(b){
+   b.onclick=function(){
+    var id=b.getAttribute('data-del');
+    if(!confirm('Remove '+id+'? This refuses if it still has upcoming bookings.'))return;
+    b.disabled=true;
+    api('/v1/machines/'+encodeURIComponent(id),{method:'DELETE'})
+    .then(function(x){ b.disabled=false;
+     say('mmsg', x.s===200?('Removed '+id+'.'):((x.j.error&&x.j.error.message)||'Could not remove.'),
+       x.s===200?'ok':'no');
+     if(x.s===200)load()})}});
   mt.querySelectorAll('[data-close],[data-open]').forEach(function(b){
    b.onclick=function(){
     var id=b.getAttribute('data-close')||b.getAttribute('data-open');

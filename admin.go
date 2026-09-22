@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -206,3 +207,151 @@ func adminCancelHandler(w http.ResponseWriter, r *http.Request) {
 	delete(out, "manage_token")
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "booking": out})
 }
+
+// --- editing and removing --------------------------------------------------
+
+// editMachineHandler changes a machine in place. Hours and days rewrite the
+// availability record; minutes and cooldown rewrite the event type. Existing
+// bookings are never touched — shortening a slot does not retro-shrink what is
+// already booked, and pretending otherwise would be worse than refusing.
+func editMachineHandler(w http.ResponseWriter, r *http.Request) {
+	c := newBkn()
+	l, ok := labSession(r, c)
+	if !ok {
+		writeErr(w, http.StatusForbidden, "forbidden", "a valid session or admin token is required")
+		return
+	}
+	machID := r.PathValue("machine")
+	m, exists := l.machineByID(machID)
+	if !exists {
+		writeErr(w, http.StatusNotFound, "not_found", "no machine "+machID+" in "+l.ID)
+		return
+	}
+	var in struct {
+		Name, Open, Days  string
+		Minutes, Cooldown *int
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&in); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid_body", "body must be a JSON object")
+		return
+	}
+	cal := calendarFor(l.ID, machID)
+
+	if in.Open != "" || in.Days != "" {
+		avDoc, err := c.get(ns, "availability", cal)
+		if err != nil {
+			writeBknErr(w, err)
+			return
+		}
+		open, days := in.Open, in.Days
+		if open == "" {
+			open = "09:00-18:00"
+		}
+		if days == "" {
+			days = "mon,tue,wed,thu,fri,sat"
+		}
+		rules := doc{}
+		for _, d := range strings.Split(days, ",") {
+			if d = strings.TrimSpace(d); d != "" {
+				rules[d] = []string{open}
+			}
+		}
+		avDoc["rules"] = rules // overrides (maintenance days) are left alone
+		if _, err := c.put(ns, "availability", cal, avDoc); err != nil {
+			writeBknErr(w, err)
+			return
+		}
+	}
+
+	if in.Minutes != nil || in.Cooldown != nil {
+		if in.Minutes != nil && *in.Minutes > 0 {
+			m.Minutes = *in.Minutes
+		}
+		if in.Cooldown != nil && *in.Cooldown >= 0 {
+			m.Cooldown = *in.Cooldown
+		}
+		if _, err := c.put(ns, "events", cal, doc{
+			"slug": cal, "calendar": cal, "minutes": m.Minutes,
+			"buffer_before": 0, "buffer_after": m.Cooldown,
+			"min_notice_minutes": 0, "daily_cap": 0,
+		}); err != nil {
+			writeBknErr(w, err)
+			return
+		}
+	}
+	if in.Name != "" {
+		m.Name = in.Name
+	}
+	if err := saveMachines(c, l, machID, &m); err != nil {
+		writeBknErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "machine": m,
+		"note": "bookings already made are unchanged"})
+}
+
+// deleteMachineHandler refuses while future bookings exist. Silently cancelling
+// members' reservations to satisfy an admin click is the kind of thing that
+// loses a lab's trust; make the organizer cancel them deliberately first.
+func deleteMachineHandler(w http.ResponseWriter, r *http.Request) {
+	c := newBkn()
+	l, ok := labSession(r, c)
+	if !ok {
+		writeErr(w, http.StatusForbidden, "forbidden", "a valid session or admin token is required")
+		return
+	}
+	machID := r.PathValue("machine")
+	if _, exists := l.machineByID(machID); !exists {
+		writeErr(w, http.StatusNotFound, "not_found", "no machine "+machID+" in "+l.ID)
+		return
+	}
+	cal := calendarFor(l.ID, machID)
+	if n := futureBookings(c, cal); n > 0 {
+		writeErr(w, http.StatusConflict, "conflict",
+			"this machine has "+itoa(n)+" upcoming booking(s) — cancel them first")
+		return
+	}
+	_ = c.del(ns, "availability", cal)
+	_ = c.del(ns, "events", cal)
+	if err := saveMachines(c, l, machID, nil); err != nil {
+		writeBknErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "removed": machID,
+		"note": "past bookings are kept as history"})
+}
+
+// futureBookings counts confirmed bookings on a calendar that have not started.
+func futureBookings(c *bkn, cal string) int {
+	recs, err := c.list(ns, "bookings", nil)
+	if err != nil {
+		return 0
+	}
+	now := time.Now().UTC().Format(stamp)
+	n := 0
+	for _, b := range recs {
+		if asStr(b["calendar"]) == cal && asStr(b["status"]) == "confirmed" && asStr(b["start"]) > now {
+			n++
+		}
+	}
+	return n
+}
+
+// saveMachines rewrites the lab's machine list: replacing one when repl is set,
+// removing it when repl is nil.
+func saveMachines(c *bkn, l lab, machID string, repl *machine) error {
+	ms := make([]any, 0, len(l.Machines))
+	for _, m := range l.Machines {
+		if m.ID == machID {
+			if repl == nil {
+				continue
+			}
+			m = *repl
+		}
+		ms = append(ms, doc{"id": m.ID, "name": m.Name, "minutes": m.Minutes, "cooldown": m.Cooldown})
+	}
+	_, err := c.patchIf(ns, "labs", l.ID, doc{"machines": ms}, nil)
+	return err
+}
+
+func itoa(n int) string { return strconv.Itoa(n) }

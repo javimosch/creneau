@@ -99,7 +99,7 @@ func (l lab) machineByID(id string) (machine, bool) {
 func labCmd(args []string) {
 	if len(args) == 0 {
 		fail(exitUsage, "missing_argument", "lab needs a subcommand",
-			"creneau lab create <id> --name '...' | lab list | lab show <id> | lab add-machine <id> <machine> | lab rotate <id>")
+			"creneau lab create <id> --name '...' | lab list | lab show <id> | lab add-machine <id> <machine> | lab rotate <id> | lab delete <id> --yes")
 	}
 	switch args[0] {
 	case "create":
@@ -112,6 +112,8 @@ func labCmd(args []string) {
 		labAddMachine(args[1:])
 	case "rotate":
 		labRotate(args[1:])
+	case "delete":
+		labDelete(args[1:])
 	default:
 		fail(exitUsage, "invalid_value", "unknown lab subcommand "+args[0],
 			"creneau lab create|list|show|add-machine")
@@ -258,4 +260,58 @@ func labRotate(args []string) {
 	out(map[string]any{"ok": true, "lab": args[0], "admin_token": tok,
 		"admin": "/" + args[0] + "/admin",
 		"note":  "any previous admin token and existing sessions for this lab stop working"})
+}
+
+// labDelete removes a lab and everything scoped to it. Destructive and
+// irreversible, so it refuses without --yes and refuses while any booking is
+// still upcoming — the same rule machine delete follows.
+func labDelete(args []string) {
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		fail(exitUsage, "missing_argument", "lab delete needs an id",
+			"creneau lab delete <id> --yes")
+	}
+	id := args[0]
+	fs := flag.NewFlagSet("lab delete", flag.ExitOnError)
+	yes := fs.Bool("yes", false, "confirm: this cannot be undone")
+	force := fs.Bool("force", false, "delete even if bookings are still upcoming")
+	_ = fs.Parse(args[1:])
+
+	c := newBkn()
+	l, err := loadLab(c, id)
+	if err != nil {
+		fail(exitUnavailable, "not_found", "no such lab "+id)
+	}
+	if !*yes {
+		fail(exitUsage, "confirmation_required",
+			"deleting "+id+" removes its machines, availability and bookings",
+			"creneau lab delete "+id+" --yes")
+	}
+	upcoming := 0
+	for _, m := range l.Machines {
+		upcoming += futureBookings(c, calendarFor(id, m.ID))
+	}
+	if upcoming > 0 && !*force {
+		fail(exitConflict, "conflict",
+			"this lab has "+itoa(upcoming)+" upcoming booking(s)",
+			"cancel them, or pass --force")
+	}
+	for _, m := range l.Machines {
+		cal := calendarFor(id, m.ID)
+		_ = c.del(ns, "availability", cal)
+		_ = c.del(ns, "events", cal)
+	}
+	// Bookings are kept as history but become unreachable; sessions must go, or
+	// a revoked lab would still have live credentials pointing at nothing.
+	if recs, lerr := c.list(ns, "sessions", nil); lerr == nil {
+		for _, s := range recs {
+			if asStr(s["lab"]) == id {
+				_ = c.del(ns, "sessions", asStr(s["id"]))
+			}
+		}
+	}
+	if err := c.del(ns, "labs", id); err != nil {
+		failBkn(err)
+	}
+	out(map[string]any{"ok": true, "deleted": id, "machines_removed": len(l.Machines),
+		"note": "past bookings are kept as history but are no longer reachable"})
 }
