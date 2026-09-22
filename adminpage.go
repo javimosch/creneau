@@ -56,53 +56,56 @@ code{font-family:var(--mono);font-size:12.5px}
 .foot{color:var(--mut);font-size:12.5px;margin-top:8px}
 </style></head><body><div class="wrap">
 <div class="top"><div><h1 id="labname">__LAB__</h1><p class="sub" id="subline">admin</p></div>
-<span><a class="hidden" id="link" href="#" style="margin-right:10px;font-size:13.5px">Link this account</a>
+<span><a id="pub" href="/__LABID__" style="margin-right:10px;font-size:13.5px">View the public board &rarr;</a>
+<a class="hidden lnk" id="link" href="#" style="margin-right:10px;font-size:13.5px">Link this account</a>
 <button class="g hidden" id="out">Sign out</button></span></div>
 
 <div class="card" id="unlock">
-  <h2>Unlock this lab</h2>
-  <p class="h">Paste the admin token you were given when the board was created.
-  It is exchanged for a session that expires — the token itself is never stored in this browser.</p>
+  <h2>Sign in to manage this board</h2>
+  <p class="h">Paste the admin token from your signup email. We swap it for a
+  sign-in that lasts two weeks, and never keep the token itself in this browser.</p>
   <label for="key">Admin token</label>
   <input id="key" type="password" autocomplete="off" spellcheck="false">
-  <div style="margin-top:12px"><button id="go">Unlock</button></div>
+  <div style="margin-top:12px"><button id="go">Sign in</button></div>
   <div id="sso" class="hidden" style="margin-top:16px;padding-top:16px;border-top:1px solid var(--bd)">
-    <p class="h" style="margin:0 0 10px">Or sign in as an organizer:</p>
+    <p class="h" style="margin:0 0 10px">Or use an account you have linked:</p>
     <div id="ssobtns"></div>
   </div>
   <div class="msg" id="umsg"></div>
-  <p class="foot">Lost it? <code>POST /v1/labs/recover</code> with your lab id or signup email.</p>
+  <p class="foot">Lost the token? <a href="#" id="recov">Email me a recovery link</a> &mdash;
+  it goes to the address this board signed up with.</p>
 </div>
 
 <div id="app" class="hidden">
   <div class="card">
     <h2>Machines</h2>
-    <p class="h">Closing a day blocks new bookings on that machine. It does not cancel bookings already made.</p>
-    <table><thead><tr><th>Machine</th><th>Slot</th><th>Cool</th><th>Open</th><th>Days</th><th></th></tr></thead>
+    <p class="h">Your machines and when they can be booked. Closing a day (for maintenance,
+    say) stops new bookings on that machine — bookings people already made stay put.</p>
+    <table><thead><tr><th>Machine</th><th>Booking length</th><th>Gap between</th><th>Hours</th><th>Days open</th><th></th></tr></thead>
     <tbody id="machines"></tbody></table>
     <div class="msg" id="mmsg"></div>
   </div>
 
   <div class="card">
     <h2>Access</h2>
-    <p class="h">Who can administer this lab, and the lab's own agent identity.</p>
+    <p class="h">Who can manage this board. Linking an account means you sign in with it instead of pasting the token.</p>
     <div id="access"></div>
-    <div style="margin-top:12px"><button class="g" id="mkagent">Create the lab's agent identity</button></div>
+    <div style="margin-top:12px"><button class="g" id="mkagent">Give this board a robot account</button></div>
     <div class="msg" id="gmsg"></div>
   </div>
 
   <div class="card">
     <h2>Add a machine</h2>
-    <p class="h">It becomes bookable immediately, on its own calendar.</p>
+    <p class="h">It can be booked straight away, on its own calendar — machines never block each other.</p>
     <div class="row">
-      <div><label for="nid">id</label><input id="nid" placeholder="laser"></div>
-      <div><label for="nname">name</label><input id="nname" placeholder="Trotec Speedy 400"></div>
-      <div><label for="nmin">slot (min)</label><input id="nmin" type="number" value="60"></div>
-      <div><label for="ncool">cooldown (min)</label><input id="ncool" type="number" value="0"></div>
+      <div><label for="nid">Short name (in links)</label><input id="nid" placeholder="laser"></div>
+      <div><label for="nname">Name people see</label><input id="nname" placeholder="Trotec Speedy 400"></div>
+      <div><label for="nmin">Booking length (minutes)</label><input id="nmin" type="number" value="60"></div>
+      <div><label for="ncool">Gap between bookings (minutes)</label><input id="ncool" type="number" value="0"></div>
     </div>
     <div class="row">
-      <div><label for="nopen">open</label><input id="nopen" value="09:00-18:00"></div>
-      <div><label for="ndays">days</label><input id="ndays" value="mon,tue,wed,thu,fri,sat"></div>
+      <div><label for="nopen">Opening hours</label><input id="nopen" value="09:00-18:00"></div>
+      <div><label for="ndays">Days open</label><input id="ndays" value="mon,tue,wed,thu,fri,sat"></div>
     </div>
     <button id="add">Add machine</button>
     <div class="msg" id="amsg"></div>
@@ -110,7 +113,7 @@ code{font-family:var(--mono);font-size:12.5px}
 
   <div class="card">
     <h2>Bookings <span class="pill" id="bcount"></span></h2>
-    <p class="h">Everything confirmed in this lab. Cancelling here frees the slot at once.</p>
+    <p class="h">Every booking made on this board. Cancelling frees the slot immediately.</p>
     <table><thead><tr><th>Machine</th><th>When</th><th>Who</th><th></th></tr></thead>
     <tbody id="bookings"></tbody></table>
     <div class="msg" id="bmsg"></div>
@@ -147,6 +150,8 @@ function enter(exp){
   var host=lk.parentNode;
   PROVIDERS.forEach(function(p,i){
    var a=(i===0)?lk:lk.cloneNode(false);
+   if(i>0)a.removeAttribute('id');   // cloneNode copies the id — duplicates are invalid
+   a.setAttribute('data-prov',p);
    a.href='/'+LAB+'/auth/start?link='+encodeURIComponent(sess)+'&provider='+encodeURIComponent(p);
    a.textContent='Link my '+p+' account';
    a.classList.remove('hidden');
@@ -217,12 +222,21 @@ function load(){
       : ((x.j.error&&x.j.error.message)||'Could not change that day.'), x.s===200?'ok':'no')})}});
   var ac=document.getElementById('access');
   var ows=(l.owners||[]);
+  // An account you have already linked should not keep offering to link it.
+  var linked={};ows.forEach(function(o){if(o.provider)linked[o.provider]=1});
+  document.querySelectorAll('.lnk').forEach(function(a){
+   var pv=a.getAttribute('data-prov');if(!pv)return;
+   if(linked[pv]){a.textContent='\u2713 '+pv+' linked';a.removeAttribute('href');
+    a.style.opacity='.65';a.style.cursor='default'}
+   else{a.textContent='Link my '+pv+' account';
+    a.href='/'+LAB+'/auth/start?link='+encodeURIComponent(sess)+'&provider='+encodeURIComponent(pv);
+    a.style.opacity='';a.style.cursor=''}});
   var h2='<table><thead><tr><th>Owner</th><th>Via</th></tr></thead><tbody>';
-  if(!ows.length){h2+='<tr><td colspan="2" style="color:var(--mut)">No linked accounts yet — you are using the admin token.</td></tr>'}
+  if(!ows.length){h2+='<tr><td colspan="2" style="color:var(--mut)">No accounts linked yet — you are signed in with the admin token.</td></tr>'}
   ows.forEach(function(o){h2+='<tr><td>'+esc(o.email||o.sub)+'</td><td><code>'+esc(o.provider)+'</code></td></tr>'});
   h2+='</tbody></table>';
   if(l.agent_handle){h2+='<p class="h" style="margin-top:10px">Agent identity: <code>'+esc(l.agent_handle)+
-    '</code> — its password was shown once when created.</p>'}
+    '</code> — the password was shown once, when you created it.</p>'}
   if(l.trial_ends){h2+='<p class="h" style="margin:4px 0 0">Trial ends '+esc(l.trial_ends.slice(0,10))+'.</p>'}
   ac.innerHTML=h2;
   document.getElementById('mkagent').disabled=!!l.agent_handle;
@@ -278,6 +292,14 @@ if(PROVIDERS.length){
   box.appendChild(a)});
  document.getElementById('sso').classList.remove('hidden')}
 document.getElementById('go').onclick=unlock;
+var rc=document.getElementById('recov');
+if(rc){rc.onclick=function(e){e.preventDefault();
+ say('umsg','Sending…');
+ fetch('/v1/labs/recover',{method:'POST',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({lab:LAB})})
+ .then(function(r){return r.json()})
+ .then(function(){say('umsg','If this board has an email on file, a recovery link is on its way. It lasts 30 minutes.','ok')})
+ .catch(function(){say('umsg','Network trouble — try again.','no')})}}
 document.getElementById('key').addEventListener('keydown',function(e){if(e.key==='Enter')unlock()});
 document.getElementById('mkagent').onclick=function(){
  var b=this;b.disabled=true;say('gmsg','minting…');
