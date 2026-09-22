@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -114,8 +115,37 @@ func usage() {
 
 // --- serve ----------------------------------------------------------------
 
+// corsMiddleware lets a browser board on another origin call the public surface.
+// The board is a static client that reads /v1/slots and posts /v1/book — the same
+// two calls an agent makes, just driven by a mouse. Without this it cannot.
+// --origin may be repeated; with none set, no CORS headers are emitted at all
+// (same-origin only), so the default stays closed.
+func corsMiddleware(next http.Handler, allowed []string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if origin != "" {
+			for _, a := range allowed {
+				if a == origin || a == "*" {
+					w.Header().Set("Access-Control-Allow-Origin", origin)
+					w.Header().Set("Vary", "Origin")
+					w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+					w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+					w.Header().Set("Access-Control-Max-Age", "600")
+					break
+				}
+			}
+		}
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func serve(args []string) {
 	host, port := "127.0.0.1", 7800
+	var origins []string
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--port":
@@ -131,6 +161,18 @@ func serve(args []string) {
 			if i+1 < len(args) {
 				i++
 				host = args[i]
+			}
+		case "--origin":
+			if i+1 < len(args) {
+				i++
+				origins = append(origins, args[i])
+			}
+		}
+	}
+	if env := os.Getenv("CRENEAU_ORIGINS"); env != "" && len(origins) == 0 {
+		for _, o := range strings.Split(env, ",") {
+			if o = strings.TrimSpace(o); o != "" {
+				origins = append(origins, o)
 			}
 		}
 	}
@@ -203,7 +245,7 @@ func serve(args []string) {
 
 	addr := host + ":" + strconv.Itoa(port)
 	fmt.Fprintf(os.Stderr, "[serve] creneau %s listening on http://%s\n", Version, addr)
-	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Addr: addr, Handler: corsMiddleware(mux, origins), ReadHeaderTimeout: 10 * time.Second}
 	if err := srv.ListenAndServe(); err != nil {
 		fail(exitUnavailable, "listen_failed", err.Error())
 	}
@@ -273,7 +315,7 @@ func guide() map[string]any {
 			"setup":    []string{"creneau install [--bkn <path>] [--dry-run]"},
 			"organize": []string{"creneau availability set [--calendar c] [--tz Z] [--mon|--tue|--wed|--thu|--fri|--sat|--sun 09:00-12:00,13:00-17:00] [--closed 2026-12-25]", "creneau event create <slug> [--calendar c] [--minutes 30] [--buffer-before N] [--buffer-after N] [--min-notice 4h] [--daily-cap N]"},
 			"booking":  []string{"creneau slots --event <slug> [--from D] [--to D]", "creneau book --event <slug> --at <rfc3339> --who <email> [--name N]", "creneau cancel <id>", "creneau reschedule <id> --at <rfc3339>", "creneau bookings list [--calendar c] [--who e] [--upcoming] [--limit N]", "creneau reconcile [--dry-run]"},
-			"server":   []string{"creneau serve [--host H] [--port N]  # public: GET /v1/slots, POST /v1/book"},
+			"server":   []string{"creneau serve [--host H] [--port N] [--origin https://site]  # public: GET /v1/slots, POST /v1/book"},
 			"meta":     []string{"creneau guide", "creneau help-json", "creneau version"},
 		},
 		"exit_codes": map[string]any{
