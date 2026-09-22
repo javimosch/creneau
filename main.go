@@ -178,6 +178,14 @@ func serve(args []string) {
 	}
 
 	mux := http.NewServeMux()
+	// The human board, when a lab is configured. Static client, same origin.
+	if lab := os.Getenv("CRENEAU_LAB"); lab != "" {
+		machines := os.Getenv("CRENEAU_MACHINES")
+		if machines == "" {
+			machines = "[]"
+		}
+		mux.HandleFunc("GET /", boardHandler(lab, machines))
+	}
 	mux.HandleFunc("GET /_health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "service": "creneau", "pid": os.Getpid()})
 	})
